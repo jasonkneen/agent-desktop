@@ -1,0 +1,110 @@
+name: Release macOS arm64 binary
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build macOS arm64
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Set release version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          /usr/bin/sed -i '' "s/0\\.0\\.0-development/${VERSION}/" Sources/mac-vnc-server/AppVersion.swift
+          grep "static let current" Sources/mac-vnc-server/AppVersion.swift
+
+      - name: Test
+        run: swift test
+
+      - name: Build arm64 release binary
+        run: swift build -c release --arch arm64 --product mac-vnc-server-dev
+
+      - name: Prepare macOS signing keychain
+        env:
+          MACOS_SIGNING_CERTIFICATE_BASE64: ${{ secrets.MAC_VNC_SERVER_MACOS_SIGNING_CERT_BASE64 }}
+          MACOS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.MAC_VNC_SERVER_MACOS_SIGNING_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MACOS_SIGNING_CERTIFICATE_BASE64:-}" ] || [ -z "${MACOS_SIGNING_CERTIFICATE_PASSWORD:-}" ]; then
+            echo "Both macOS signing secrets must be supplied." >&2
+            exit 1
+          fi
+
+          CERTIFICATE_PATH="$RUNNER_TEMP/mac-vnc-server-signing.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/mac-vnc-server-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
+          printf '%s' "$MACOS_SIGNING_CERTIFICATE_BASE64" | base64 -D > "$CERTIFICATE_PATH"
+          {
+            printf 'MACOS_SIGNING_CERTIFICATE_PATH=%s\n' "$CERTIFICATE_PATH"
+            printf 'MACOS_SIGNING_KEYCHAIN=%s\n' "$KEYCHAIN_PATH"
+          } >> "$GITHUB_ENV"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_SIGNING_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          SIGNING_IDENTITY="$(security find-certificate -a -Z "$KEYCHAIN_PATH" \
+            | sed -n 's/^SHA-1 hash: \([0-9A-Fa-f]\{40\}\)$/\1/p' \
+            | head -n 1)"
+          if [ -z "$SIGNING_IDENTITY" ]; then
+            echo "No imported macOS signing certificate fingerprint was found." >&2
+            security find-certificate -a -Z "$KEYCHAIN_PATH" >&2 || true
+            exit 1
+          fi
+          printf 'MACOS_SIGNING_IDENTITY=%s\n' "$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Prepare release assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp .build/arm64-apple-macosx/release/mac-vnc-server-dev dist/mac-vnc-server
+          codesign \
+            --force \
+            --sign "$MACOS_SIGNING_IDENTITY" \
+            --keychain "$MACOS_SIGNING_KEYCHAIN" \
+            --identifier com.pablozaiden.mac-vnc-server \
+            --timestamp=none \
+            dist/mac-vnc-server
+          codesign --verify --verbose=2 dist/mac-vnc-server
+          (cd dist && shasum -a 256 mac-vnc-server > mac-vnc-server.sha256)
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/mac-vnc-server dist/mac-vnc-server.sha256 --clobber
+
+      - name: Remove macOS signing keychain
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MACOS_SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "$MACOS_SIGNING_KEYCHAIN" || true
+          fi
+          if [ -n "${MACOS_SIGNING_CERTIFICATE_PATH:-}" ]; then
+            rm -f "$MACOS_SIGNING_CERTIFICATE_PATH"
+          fi

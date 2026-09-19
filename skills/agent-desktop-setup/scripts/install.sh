@@ -1,0 +1,55 @@
+#!/bin/bash
+# Build and install both hosts into the shared prefix. Safe to re-run.
+# Does NOT create the account, log it in, or grant permissions - see the skill.
+set -euo pipefail
+PREFIX="${AGENSIS_PREFIX:-/Users/Shared/agensis}"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+
+command -v swift >/dev/null || { echo "Swift toolchain required (install Xcode)." >&2; exit 1; }
+
+# The prefix must be writable by the agent account too: it drops self-test.txt
+# there to prove its permissions. 1777 + sticky = agent can add its own files
+# but cannot touch or delete yours.
+mkdir -p "$PREFIX"
+chmod 1777 "$PREFIX"
+
+echo "Building agensis-cu (the hands)..."
+( cd "$HERE/native/agensis-cu" && swift build -c release )
+install -m 755 "$HERE/native/agensis-cu/.build/release/agensis-cu" "$PREFIX/agensis-cu"
+
+echo "Building mac-vnc-server (the eyes)..."
+# Vendored source (see native/mac-vnc-server/VENDORED.md) so the
+# session-scoped input fix ships with the plugin. Override MAC_VNC_SRC to
+# build your own checkout instead.
+SRC="${MAC_VNC_SRC:-$HERE/native/mac-vnc-server}"
+if [ ! -f "$SRC/Package.swift" ]; then
+  echo "  no Package.swift in $SRC" >&2; exit 1
+fi
+( cd "$SRC" && swift build -c release )
+# the built product is named -dev; everything here calls it mac-vnc-server
+install -m 755 "$SRC/.build/release/mac-vnc-server-dev" "$PREFIX/mac-vnc-server"
+
+echo "Building AgentUser.app (the wizard and viewer)..."
+# A real bundle, not a bare binary: macOS ties permission grants to a bundle
+# identity, and plain executables are often not even offered in the lists.
+bash "$HERE/native/AgentUser/bundle.sh" "$PREFIX" >/dev/null
+
+echo "Signing with stable identifiers..."
+# Ad-hoc signatures with fixed identifiers: macOS keys TCC permission grants
+# to the code identity, so re-running this script after an edit no longer
+# voids the user's Screen Recording / Accessibility grants.
+codesign --force --sign - --identifier com.agentdesktop.agensis-cu     "$PREFIX/agensis-cu"
+codesign --force --sign - --identifier com.agentdesktop.mac-vnc-server "$PREFIX/mac-vnc-server"
+
+if [ ! -f "$PREFIX/vnc-pass" ]; then
+  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12 > "$PREFIX/vnc-pass"
+  chmod 644 "$PREFIX/vnc-pass"
+  echo "Generated a VNC password in $PREFIX/vnc-pass"
+fi
+
+echo
+echo "Installed into $PREFIX:"
+ls -1 "$PREFIX"
+echo
+echo "Next: open $PREFIX/AgentUser.app — it picks up from wherever you are."
+echo "Prefer the terminal? run check-setup.sh or /agent-desktop:agent-desktop."

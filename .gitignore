@@ -1,0 +1,18 @@
+# secrets and per-machine state - never commit
+vnc-pass
+self-test.txt
+
+# fetched third-party trees
+noVNC/
+
+# swift build output
+.build/
+*.dSYM/
+
+# capture scratch
+*.mov
+.DS_Store
+*.app/
+
+# signed/notarized release output
+dist/

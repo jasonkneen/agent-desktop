@@ -1,0 +1,19 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "agent-desktop",
+  "description": "An agent's own macOS desktop",
+  "owner": {
+    "name": "jkneen"
+  },
+  "plugins": [
+    {
+      "name": "agent-desktop",
+      "description": "An agent's own macOS desktop: computer use in a real login session, live browser view, guided setup",
+      "author": {
+        "name": "jkneen"
+      },
+      "category": "productivity",
+      "source": "./"
+    }
+  ]
+}
