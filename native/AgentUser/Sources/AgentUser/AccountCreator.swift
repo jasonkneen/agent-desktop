@@ -45,11 +45,19 @@ enum AccountCreator {
     FileManager.default.isExecutableFile(atPath: helperURL().path)
   }
 
-  /// Shell-quote a value for the do shell script string. The account and
+  /// Shell-quote a value for inside `do shell script`. The account and
   /// display names come from our own UI, but the helper re-validates
   /// everything anyway; quoting is defence, not the safety story.
   private static func sh(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+  }
+
+  /// AppleScript-quote a value for the script source: double quotes, with
+  /// embedded quotes and backslashes escaped.
+  private static func asl(_ value: String) -> String {
+    "\"" + value
+      .replacingOccurrences(of: "\\", with: "\\\\")
+      .replacingOccurrences(of: "\"", with: "\\\"") + "\""
   }
 
   static func create(account: String, display: String) async throws -> Outcome {
@@ -66,8 +74,8 @@ enum AccountCreator {
       "\(sh(helper)) create --account \(sh(account)) --display \(sh(display)) " +
       "--owner-uid \(ownerUID) --pass-file \(sh(passFile))"
     let script =
-      "do shell script \(sh(command)) with administrator privileges " +
-      "with prompt \(sh("Agent Desktop wants to create the macOS account “\(account)”"))"
+      "do shell script \(asl(command)) with administrator privileges " +
+      "with prompt \(asl("Agent Desktop wants to create the macOS account “\(account)”"))"
 
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
