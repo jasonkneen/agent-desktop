@@ -1,15 +1,21 @@
 import SwiftUI
 
-/// Adding an agent. The app picks the account name and port, then hands over
-/// the two things it cannot do. Saying so up front matters: a wizard that
-/// silently stops at an admin prompt reads as broken.
+/// Adding an agent. The app creates the macOS account itself — a root helper
+/// behind the standard administrator prompt — then shows the generated
+/// password once so the human can sign the account in at the login screen.
+/// The manual command stays as a fallback for people who would rather do it
+/// by hand.
 struct AddAgentSheet: View {
   @ObservedObject var model: AgentsModel
   @Environment(\.dismiss) private var dismiss
   @State private var name = ""
+  @State private var creating = false
+  @State private var failure: String?
+  @State private var outcome: AccountCreator.Outcome?
 
   private var account: String { model.registry.nextAccount() }
   private var port: UInt16 { model.registry.nextPort() }
+  private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -28,16 +34,42 @@ struct AddAgentSheet: View {
           Text("What should it be called?").font(.callout.weight(.medium))
           TextField("Scout", text: $name)
             .textFieldStyle(.roundedBorder)
-          Text("Account **\(account)**, port **\(String(port))** — both picked for you.")
+            .disabled(creating || outcome != nil)
+          Text("Account **\(outcome?.result.account ?? account)**, port **\(String(port))** — both picked for you.")
             .font(.caption).foregroundStyle(.secondary)
         }
 
-        HumanBadge(reason: "Creating the account needs admin rights, and only the real login window can start a desktop. The app hands you each one and waits.")
+        if let outcome {
+          created(outcome)
+        } else {
+          HumanBadge(reason: "Creating the account asks for your administrator password — the standard macOS prompt, once. After that, only the real login window can start its desktop, so you sign it in yourself.")
 
-        VStack(alignment: .leading, spacing: 9) {
-          numbered(1, "Copy the command that creates **\(account)**")
-          numbered(2, "Sign it in once via the user menu")
-          numbered(3, "Open this app there and grant two permissions")
+          if let failure {
+            Label(failure, systemImage: "exclamationmark.triangle.fill")
+              .font(.callout).foregroundStyle(Theme.waiting)
+              .fixedSize(horizontal: false, vertical: true)
+          }
+
+          if creating {
+            HStack(spacing: 9) {
+              ProgressView().controlSize(.small)
+              Text("Creating the account…")
+            }
+          } else {
+            DisclosureGroup("Or create the account yourself") {
+              VStack(alignment: .leading, spacing: 9) {
+                numbered(1, "Create **\(account)** yourself, as a standard account")
+                numbered(2, "Sign it in once via the user menu")
+                numbered(3, "Open this app there and grant two permissions")
+              }
+              .padding(.top, 4)
+              Button("Register \(account) manually") {
+                model.add(name: trimmedName)
+                dismiss()
+              }
+              .padding(.top, 4)
+            }
+          }
         }
       }
       .padding(22)
@@ -46,17 +78,75 @@ struct AddAgentSheet: View {
 
       HStack {
         Spacer()
-        Button("Cancel") { dismiss() }
-        Button("Start setup") {
-          model.add(name: name.trimmingCharacters(in: .whitespaces))
-          dismiss()
+        if outcome == nil {
+          Button("Cancel") { dismiss() }
+          Button {
+            createAccount()
+          } label: {
+            if creating { ProgressView().controlSize(.small) } else {
+              Text(failure == nil ? "Create \(account) account…" : "Try again")
+            }
+          }
+          .buttonStyle(.borderedProminent)
+          .disabled(trimmedName.isEmpty || creating || !AccountCreator.available())
+          if !AccountCreator.available() {
+            Text("helper not installed")
+              .font(.caption).foregroundStyle(.secondary)
+          }
+        } else {
+          Button("Done") {
+            model.add(name: trimmedName, account: outcome!.result.account, port: port)
+            dismiss()
+          }
+          .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
         }
-        .buttonStyle(.borderedProminent)
-        .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
       }
       .padding(16)
     }
     .frame(width: 520)
+  }
+
+  /// The success half: the password, shown once, plus what only a human can do.
+  @ViewBuilder
+  private func created(_ outcome: AccountCreator.Outcome) -> some View {
+    VStack(alignment: .leading, spacing: 7) {
+      Label("Account “\(outcome.result.account)” created", systemImage: "checkmark.circle.fill")
+        .font(.callout.weight(.medium)).foregroundStyle(Theme.done)
+      HStack(spacing: 8) {
+        Text(outcome.password)
+          .font(.system(.callout, design: .monospaced))
+          .textSelection(.enabled)
+          .lineLimit(1).truncationMode(.middle)
+        Button("Copy") {
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setString(outcome.password, forType: .string)
+        }
+      }
+      Text("You'll type this once, at the login screen, when you switch to the agent. It is saved at **\(Paths().prefix.appending(path: outcome.result.account + "-pass").path)** and nowhere else.")
+        .font(.caption).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    VStack(alignment: .leading, spacing: 9) {
+      numbered(1, "Switch to **\(outcome.result.account)** via the user menu and sign in with that password")
+      numbered(2, "Open this app there and grant two permissions")
+    }
+  }
+
+  private func createAccount() {
+    failure = nil
+    creating = true
+    let account = account, display = trimmedName
+    Task { @MainActor in
+      do {
+        outcome = try await AccountCreator.create(account: account, display: display)
+      } catch let e as AccountCreator.CreationError {
+        if let why = e.errorDescription { failure = why }
+      } catch {
+        failure = error.localizedDescription
+      }
+      creating = false
+    }
   }
 
   private func numbered(_ n: Int, _ text: String) -> some View {

@@ -25,7 +25,7 @@ echo
 if id "$ACCOUNT" >/dev/null 2>&1; then
   row ok "account" "exists (uid $(id -u "$ACCOUNT"))"
 else
-  row no "account" "no such user - the USER must create it: sudo sysadminctl -addUser $ACCOUNT -fullName Agent -password -"
+  row no "account" "no such user - create it via the app's Add-agent sheet, or: sudo sysadminctl -addUser $ACCOUNT -fullName Agent -password -"
 fi
 
 # A logged-in session shows a loginwindow process owned by that account. Dock

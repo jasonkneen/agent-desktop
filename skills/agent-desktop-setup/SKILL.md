@@ -60,9 +60,16 @@ Run `scripts/check-setup.sh` first and after every step. It prints exactly which
 of the following is missing, so you never guess. Fix the **first** red row — the
 rows are dependency-ordered, so later failures are usually just fallout.
 
-### 1. Create the account — the user must do this
+### 1. Create the account — usually the app does this
 
-Needs admin rights, so hand them the command rather than trying it:
+The Agent Desktop app's "Add an agent" sheet creates the account itself: a
+root helper behind the standard administrator prompt generates the account and
+a random password (saved to `<prefix>/<account>-pass` for the user to type at
+the login screen). **Prefer that path** — it generates a strong password that
+never crosses the terminal.
+
+If the user prefers to do it by hand, hand them the command rather than trying
+it:
 
 ```
 sudo sysadminctl -addUser agent -fullName "Agent" -password -

@@ -72,9 +72,12 @@ which tool to reach for next:
 | your account, setup finished | the viewer |
 
 The wizard polls the real state, so a step goes green when it is actually
-true — never because you told it so. Two steps stay yours, and it says why on
-each: creating the account needs admin rights, and only the real login window
-can start a desktop session.
+true — never because you told it so. Adding an agent creates the macOS account
+for you: the app's "Add an agent" sheet asks for your administrator password
+once (the standard macOS prompt), generates the account, and shows you a
+random password to type once at the login screen. Two steps stay yours, and
+it says why on each: only the real login window can start a desktop session,
+and the agent's permissions are granted inside its own account.
 
 Why an app rather than another script: running inside the agent's account it
 can ask macOS for the permissions itself, so the dialogs appear in front of

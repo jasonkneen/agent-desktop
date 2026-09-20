@@ -37,6 +37,18 @@ final class AgentsModel: ObservableObject {
     refresh()
     return a
   }
+
+  /// Register an agent whose account already exists (the setup helper created
+  /// it): keep the account and port that are actually true on this machine.
+  @discardableResult
+  func add(name: String, account: String, port: UInt16) -> Agent {
+    var r = registry
+    let a = r.add(name: name, account: account, port: port)
+    registry = r
+    RegistryStore.save(r, prefix: paths.prefix)
+    refresh()
+    return a
+  }
 }
 
 struct AgentListView: View {

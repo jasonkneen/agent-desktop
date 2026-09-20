@@ -13,6 +13,9 @@ BIN="${AGENTUSER_BIN:-$HERE/.build/release/AgentUser}"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/AgentUser"
+# The account-creation helper rides inside the bundle so a DMG install works
+# without install.sh; AccountCreator finds it next to the main executable.
+cp "$HERE/.build/release/agentdesktop-setup" "$APP/Contents/MacOS/agentdesktop-setup"
 cp "$HERE/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 # Version comes from the repo-root VERSION file (single source of truth);

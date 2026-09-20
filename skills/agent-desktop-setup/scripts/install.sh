@@ -1,6 +1,7 @@
 #!/bin/bash
-# Build and install both hosts into the shared prefix. Safe to re-run.
-# Does NOT create the account, log it in, or grant permissions - see the skill.
+# Build and install all hosts and the account-creation helper into the shared prefix. Safe to re-run.
+# Does NOT log the agent in, or grant permissions - see the skill. Account
+# creation now happens from the app's Add-agent sheet (or the skill's manual command).
 set -euo pipefail
 PREFIX="${AGENSIS_PREFIX:-/Users/Shared/agensis}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
@@ -34,12 +35,18 @@ echo "Building AgentUser.app (the wizard and viewer)..."
 # identity, and plain executables are often not even offered in the lists.
 bash "$HERE/native/AgentUser/bundle.sh" "$PREFIX" >/dev/null
 
+echo "Building agentdesktop-setup (the account-creation helper)..."
+# Run as root via the app's administrator prompt; does the OpenDirectory
+# account creation the wizard asks for.
+install -m 755 "$HERE/native/AgentUser/.build/release/agentdesktop-setup" "$PREFIX/agentdesktop-setup"
+
 echo "Signing with stable identifiers..."
 # Ad-hoc signatures with fixed identifiers: macOS keys TCC permission grants
 # to the code identity, so re-running this script after an edit no longer
 # voids the user's Screen Recording / Accessibility grants.
 codesign --force --sign - --identifier com.agentdesktop.agensis-cu     "$PREFIX/agensis-cu"
 codesign --force --sign - --identifier com.agentdesktop.mac-vnc-server "$PREFIX/mac-vnc-server"
+codesign --force --sign - --identifier com.agentdesktop.setup          "$PREFIX/agentdesktop-setup"
 
 if [ ! -f "$PREFIX/vnc-pass" ]; then
   LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12 > "$PREFIX/vnc-pass"

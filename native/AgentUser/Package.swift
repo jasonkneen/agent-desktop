@@ -10,9 +10,14 @@ import PackageDescription
 let package = Package(
   name: "AgentUser",
   platforms: [.macOS(.v14)],
-  products: [.executable(name: "AgentUser", targets: ["AgentUser"])],
+  products: [
+    .executable(name: "AgentUser", targets: ["AgentUser"]),
+    .executable(name: "agentdesktop-setup", targets: ["SetupHelper"]),
+  ],
   targets: [
-    .executableTarget(name: "AgentUser"),
-    .testTarget(name: "AgentUserTests", dependencies: ["AgentUser"]),
+    .executableTarget(name: "AgentUser", dependencies: ["SetupCore"]),
+    .executableTarget(name: "SetupHelper", dependencies: ["SetupCore"]),
+    .target(name: "SetupCore"),
+    .testTarget(name: "AgentUserTests", dependencies: ["AgentUser", "SetupCore"]),
   ]
 )

@@ -62,6 +62,15 @@ public struct Registry: Codable, Equatable, Sendable {
     agents.append(a)
     return a
   }
+
+  /// For an account created outside the registry (the setup helper makes it
+  /// before registration): keep the account and port that were actually
+  /// created rather than recomputing them, so the registry matches reality.
+  public mutating func add(name: String, account: String, port: UInt16) -> Agent {
+    let a = Agent(name: name, account: account, port: port)
+    agents.append(a)
+    return a
+  }
 }
 
 public enum RegistryStore {
