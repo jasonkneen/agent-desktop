@@ -71,6 +71,16 @@ public struct Registry: Codable, Equatable, Sendable {
     agents.append(a)
     return a
   }
+
+  /// Soft delete: drop the list entry only. The macOS account, its files and
+  /// its pass file are never touched — the human deletes the account in System
+  /// Settings when they are done with it.
+  @discardableResult
+  public mutating func remove(account: String) -> Bool {
+    let before = agents.count
+    agents.removeAll { $0.account == account }
+    return agents.count < before
+  }
 }
 
 public enum RegistryStore {
@@ -78,16 +88,28 @@ public enum RegistryStore {
 
   /// A machine set up before the registry existed has an `agent` account and no
   /// file. Rather than showing an empty list and losing it, adopt it.
+  ///
+  /// Rows whose macOS account is gone are swept, not shown: a deleted entry
+  /// rots the port and account-name inference for every agent after it. The
+  /// sweep persists, so it happens once per deletion, not on every load.
   public static func load(prefix: URL, probe: SystemProbe) -> Registry {
     let file = url(prefix: prefix)
+    var reg: Registry
     if let data = try? Data(contentsOf: file),
-       let reg = try? JSONDecoder.registry.decode(Registry.self, from: data) {
-      return reg
+       let decoded = try? JSONDecoder.registry.decode(Registry.self, from: data) {
+      reg = decoded
+    } else if probe.userExists("agent") {
+      reg = Registry(agents: [Agent(name: "Agent", account: "agent", port: Registry.firstPort)])
+    } else {
+      return Registry()
     }
-    if probe.userExists("agent") {
-      return Registry(agents: [Agent(name: "Agent", account: "agent", port: Registry.firstPort)])
+
+    let live = reg.agents.filter { probe.userExists($0.account) }
+    if live.count != reg.agents.count {
+      reg.agents = live
+      save(reg, prefix: prefix)
     }
-    return Registry()
+    return reg
   }
 
   @discardableResult

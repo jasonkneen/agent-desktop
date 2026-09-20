@@ -39,11 +39,13 @@ public enum AgentStatus: Equatable, Sendable {
     }
   }
 
-  /// What the one button on the row does.
+  /// What the one button on the row does. Signed-out is no longer a question
+  /// — the helper can sign the account back in, in the background, so the
+  /// button just says so.
   public var action: String {
     switch self {
     case .notSetUp: return "Set up"
-    case .signedOut: return "How"
+    case .signedOut: return "Sign in"
     case .waiting: return "Start"
     case .idle, .live: return "Watch"
     }

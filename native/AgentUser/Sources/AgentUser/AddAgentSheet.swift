@@ -94,10 +94,7 @@ struct AddAgentSheet: View {
               .font(.caption).foregroundStyle(.secondary)
           }
         } else {
-          Button("Done") {
-            model.add(name: trimmedName, account: outcome!.result.account, port: port)
-            dismiss()
-          }
+          Button("Done") { dismiss() }   // the row was registered the moment the account existed
           .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
         }
       }
@@ -106,40 +103,57 @@ struct AddAgentSheet: View {
     .frame(width: 520)
   }
 
-  /// The success half: the password, shown once, plus what only a human can do.
+  /// The success half. Registration already happened — the row is live below.
+  /// The password matters only as recovery: the account was signed in in the
+  /// background, so nobody should ever need to type this.
   @ViewBuilder
   private func created(_ outcome: AccountCreator.Outcome) -> some View {
     VStack(alignment: .leading, spacing: 7) {
-      Label("Account “\(outcome.result.account)” created", systemImage: "checkmark.circle.fill")
-        .font(.callout.weight(.medium)).foregroundStyle(Theme.done)
-      HStack(spacing: 8) {
-        Text(outcome.password)
-          .font(.system(.callout, design: .monospaced))
-          .textSelection(.enabled)
-          .lineLimit(1).truncationMode(.middle)
-        Button("Copy") {
-          NSPasteboard.general.clearContents()
-          NSPasteboard.general.setString(outcome.password, forType: .string)
-        }
+      if outcome.result.signedIn {
+        Label("Account “\(outcome.result.account)” created and signed in", systemImage: "checkmark.circle.fill")
+          .font(.callout.weight(.medium)).foregroundStyle(Theme.done)
+        Text("Its desktop is starting in the background. If its row below does not go live within a few seconds, open it and grant the two permissions inside its desktop.")
+          .font(.callout).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      } else {
+        Label("Account “\(outcome.result.account)” created", systemImage: "checkmark.circle.fill")
+          .font(.callout.weight(.medium)).foregroundStyle(Theme.done)
+        Text("macOS has not shown its background session yet. If it does not appear, use “Sign in” on its row, or sign in once via the user menu with the password below.")
+          .font(.callout).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
       }
-      Text("You'll type this once, at the login screen, when you switch to the agent. It is saved at **\(Paths().prefix.appending(path: outcome.result.account + "-pass").path)** and nowhere else.")
-        .font(.caption).foregroundStyle(.secondary)
-        .fixedSize(horizontal: false, vertical: true)
-    }
 
-    VStack(alignment: .leading, spacing: 9) {
-      numbered(1, "Switch to **\(outcome.result.account)** via the user menu and sign in with that password")
-      numbered(2, "Open this app there and grant two permissions")
+      DisclosureGroup("Its password (recovery only)") {
+        VStack(alignment: .leading, spacing: 7) {
+          HStack(spacing: 8) {
+            Text(outcome.password)
+              .font(.system(.callout, design: .monospaced))
+              .textSelection(.enabled)
+              .lineLimit(1).truncationMode(.middle)
+            Button("Copy") {
+              NSPasteboard.general.clearContents()
+              NSPasteboard.general.setString(outcome.password, forType: .string)
+            }
+          }
+          Text("Saved at **\(Paths().prefix.appending(path: outcome.result.account + "-pass").path)** and nowhere else. You should never need to type this — the account was signed in automatically. If macOS ever logs it out, “Sign in” on its row redoes that.")
+            .font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 4)
+      }
     }
   }
 
   private func createAccount() {
     failure = nil
     creating = true
-    let account = account, display = trimmedName
+    let account = account, display = trimmedName, port = port
     Task { @MainActor in
       do {
-        outcome = try await AccountCreator.create(account: account, display: display)
+        let outcome = try await AccountCreator.create(account: account, display: display)
+        // Registered the moment it exists, so the row below is already live.
+        model.add(name: display, account: outcome.result.account, port: port)
+        self.outcome = outcome
       } catch let e as AccountCreator.CreationError {
         if let why = e.errorDescription { failure = why }
       } catch {

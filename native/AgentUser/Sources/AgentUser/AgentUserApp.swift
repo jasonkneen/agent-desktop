@@ -114,7 +114,7 @@ struct ViewerHost: View {
         .foregroundStyle(status.watchable ? Theme.done : Theme.waiting)
     }
     .padding(.horizontal, 14).padding(.vertical, 9)
-    .background(.ultraThinMaterial)
+    .glassEffect(.regular, in: Rectangle())
   }
 
   private var password: String {

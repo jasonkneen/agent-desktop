@@ -45,7 +45,7 @@ struct ViewerWindow: View {
           .help("Tell the agent to keep its hands off while you use this desktop")
       }
       .padding(.horizontal, 14).padding(.vertical, 8)
-      .background(.ultraThinMaterial)
+      .glassEffect(.regular, in: Rectangle())
     }
     .frame(minWidth: 900, minHeight: 620)
   }

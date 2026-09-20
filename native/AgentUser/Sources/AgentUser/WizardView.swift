@@ -29,7 +29,7 @@ struct WizardView: View {
     HStack(spacing: 0) {
       steps
         .frame(width: 260)
-        .background(.ultraThinMaterial)
+        .glassEffect(.regular, in: Rectangle())
       Divider()
       detail
         .frame(maxWidth: .infinity, maxHeight: .infinity)

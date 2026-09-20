@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 // AgentUser — the setup wizard and viewer for an agent's own macOS desktop.
 //
 // One binary, three faces, chosen by where it is running and how far setup has
@@ -9,7 +9,7 @@ import PackageDescription
 
 let package = Package(
   name: "AgentUser",
-  platforms: [.macOS(.v14)],
+  platforms: [.macOS(.v26)],
   products: [
     .executable(name: "AgentUser", targets: ["AgentUser"]),
     .executable(name: "agentdesktop-setup", targets: ["SetupHelper"]),

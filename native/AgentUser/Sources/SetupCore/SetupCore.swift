@@ -51,15 +51,22 @@ public struct CreationRequest: Codable, Equatable, Sendable {
 }
 
 /// What the helper reports on success. The password is not in here — read
-/// the pass file instead.
+/// the pass file instead. `session` is the SkyLight session id of the
+/// background login (non-zero when the account was signed in without a
+/// human); `sessionConfirmed` says the session actually appeared in the
+/// session list, not just that the call returned success.
 public struct CreationResult: Codable, Equatable, Sendable {
   public var account: String
   public var uid: UInt32
   public var home: String
+  public var session: UInt32?
+  public var sessionConfirmed: Bool?
 
   public init(account: String, uid: UInt32, home: String) {
     self.account = account
     self.uid = uid
     self.home = home
   }
+
+  public var signedIn: Bool { (session ?? 0) != 0 }
 }

@@ -28,6 +28,41 @@ import Foundation
   #expect(r.nextAccount() == "agent2")
 }
 
+/// Soft delete: only the row goes. The macOS account is the human's to remove,
+/// so `remove` must never be able to do more than edit the list.
+@Test func removingAnEntryTouchesOnlyTheRegistry() {
+  var r = Registry()
+  _ = r.add(name: "A"); _ = r.add(name: "B")
+  #expect(r.remove(account: "agent") == true)
+  #expect(r.agents.map(\.account) == ["agent2"])
+  #expect(r.remove(account: "agent") == false)   // already gone; not an error
+  #expect(r.remove(account: "nobody") == false)
+}
+
+/// A row whose macOS account has been deleted rots the port and account-name
+/// inference for every later agent, so load() sweeps it — and persists the
+/// sweep, so it happens once per deletion rather than on every load.
+@Test func loadDropsRowsWhoseAccountIsGone() throws {
+  let dir = FileManager.default.temporaryDirectory
+    .appending(path: "agentdesktop-tests-\(UUID().uuidString)")
+  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: dir) }
+
+  var r = Registry()
+  _ = r.add(name: "Scout", account: "agent", port: 5902)
+  _ = r.add(name: "Boris", account: "agent2", port: 5903)
+  try JSONEncoder.registry.encode(r).write(to: RegistryStore.url(prefix: dir))
+
+  var p = FakeProbe(); p.users = ["agent"]   // agent2 was deleted in System Settings
+  let loaded = RegistryStore.load(prefix: dir, probe: p)
+  #expect(loaded.agents.map(\.account) == ["agent"])
+
+  // The sweep persisted: what is on disk now agrees, without any probe.
+  let onDisk = try JSONDecoder.registry.decode(
+    Registry.self, from: Data(contentsOf: RegistryStore.url(prefix: dir)))
+  #expect(onDisk.agents.map(\.account) == ["agent"])
+}
+
 @Test func registrySurvivesARoundTrip() throws {
   var r = Registry()
   _ = r.add(name: "Scout"); _ = r.add(name: "Builder")
@@ -121,4 +156,10 @@ private func ready(_ a: Agent) -> FakeProbe {
   #expect(!AgentStatus.waiting.watchable)
   #expect(!AgentStatus.signedOut.watchable)
   #expect(!AgentStatus.notSetUp("x").watchable)
+}
+
+/// A signed-out row's button is the fix, not an explanation: the helper can
+/// sign the account back in, in the background.
+@Test func aSignedOutRowOffersSignIn() {
+  #expect(AgentStatus.signedOut.action == "Sign in")
 }

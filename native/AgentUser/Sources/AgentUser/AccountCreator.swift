@@ -60,23 +60,28 @@ enum AccountCreator {
       .replacingOccurrences(of: "\"", with: "\\\"") + "\""
   }
 
-  static func create(account: String, display: String) async throws -> Outcome {
-    if let why = AccountName.reason(account) { throw CreationError.badName(why) }
+  /// Background-sign-in an existing agent account from its stored pass file.
+  /// The recovery path for an account with no session (created before the
+  /// background login existed, or logged out at a restart).
+  static func signIn(account: String) async throws -> CreationResult {
     let helper = helperURL().path
     guard FileManager.default.isExecutableFile(atPath: helper) else {
       throw CreationError.helperMissing
     }
-
-    let ownerUID = UInt32(getuid())
     let passFile = Paths().prefix.appending(path: account + "-pass").path
-
-    let command =
-      "\(sh(helper)) create --account \(sh(account)) --display \(sh(display)) " +
-      "--owner-uid \(ownerUID) --pass-file \(sh(passFile))"
+    guard FileManager.default.fileExists(atPath: passFile) else {
+      throw CreationError.failed(
+        "No stored password for \(account). Sign it in once via the user menu, " +
+        "or delete it from the list and add it again.")
+    }
+    let command = "\(sh(helper)) login --account \(sh(account)) --pass-file \(sh(passFile))"
     let script =
       "do shell script \(asl(command)) with administrator privileges " +
-      "with prompt \(asl("Agent Desktop wants to create the macOS account “\(account)”"))"
+      "with prompt \(asl("Agent Desktop wants to sign “\(account)” in, in the background"))"
+    return try await runHelper(script: script)
+  }
 
+  private static func runHelper(script: String) async throws -> CreationResult {
     let proc = Process()
     proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
     proc.arguments = ["-e", script]
@@ -97,9 +102,32 @@ enum AccountCreator {
       // The helper writes its refusal reason to stderr; surface it as-is.
       throw CreationError.failed(message.isEmpty ? "the setup helper failed" : message)
     }
-
     do {
-      let result = try JSONDecoder().decode(CreationResult.self, from: stdout)
+      return try JSONDecoder().decode(CreationResult.self, from: stdout)
+    } catch {
+      throw CreationError.failed("could not read the setup helper's result: \(error.localizedDescription)")
+    }
+  }
+
+  static func create(account: String, display: String) async throws -> Outcome {
+    if let why = AccountName.reason(account) { throw CreationError.badName(why) }
+    let helper = helperURL().path
+    guard FileManager.default.isExecutableFile(atPath: helper) else {
+      throw CreationError.helperMissing
+    }
+
+    let ownerUID = UInt32(getuid())
+    let passFile = Paths().prefix.appending(path: account + "-pass").path
+
+    let command =
+      "\(sh(helper)) create --account \(sh(account)) --display \(sh(display)) " +
+      "--owner-uid \(ownerUID) --pass-file \(sh(passFile))"
+    let script =
+      "do shell script \(asl(command)) with administrator privileges " +
+      "with prompt \(asl("Agent Desktop wants to create the macOS account “\(account)”"))"
+
+    let result = try await runHelper(script: script)
+    do {
       let password = String(decoding: try Data(contentsOf: URL(fileURLWithPath: passFile)),
                             as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
       guard !password.isEmpty else { throw CreationError.failed("the pass file is empty") }
@@ -107,7 +135,7 @@ enum AccountCreator {
     } catch let e as CreationError {
       throw e
     } catch {
-      throw CreationError.failed("could not read the setup helper's result: \(error.localizedDescription)")
+      throw CreationError.failed("could not read the pass file: \(error.localizedDescription)")
     }
   }
 }
