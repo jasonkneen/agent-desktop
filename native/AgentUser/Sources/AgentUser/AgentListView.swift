@@ -147,7 +147,13 @@ struct AgentRowView: View {
   @State private var confirmingDelete = false
   @State private var showingWizard = false
   @State private var signingIn = false
+  /// True from a successful sign-in until the poller actually sees the
+  /// session. Without it there is a two-second window where the button is
+  /// clickable again but a second click only fires a duplicate admin prompt.
+  @State private var awaitingSession = false
   @State private var note: String?
+
+  private var busy: Bool { signingIn || awaitingSession }
 
   var body: some View {
     HStack(spacing: 14) {
@@ -170,10 +176,17 @@ struct AgentRowView: View {
       Button {
         act()
       } label: {
-        if signingIn { ProgressView().controlSize(.small) } else { Text(row.status.action) }
+        if busy {
+          HStack(spacing: 6) {
+            ProgressView().controlSize(.small)
+            Text(awaitingSession ? "Starting…" : row.status.action)
+          }
+        } else {
+          Text(row.status.action)
+        }
       }
       .buttonStyle(row.status.watchable ? AnyButtonStyle(.borderedProminent) : AnyButtonStyle(.bordered))
-      .disabled(signingIn)
+      .disabled(busy)
 
       Button {
         confirmingDelete = true
@@ -185,6 +198,11 @@ struct AgentRowView: View {
     }
     .padding(14)
     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.radius))
+    .onChange(of: row.status) { _, new in
+      if case .signedOut = new { return }
+      awaitingSession = false
+      note = nil
+    }
     .confirmationDialog(
       "Remove \(row.agent.name)?",
       isPresented: $confirmingDelete, titleVisibility: .visible) {
@@ -218,9 +236,14 @@ struct AgentRowView: View {
       Task { @MainActor in
         do {
           let result = try await AccountCreator.signIn(account: account)
-          note = result.signedIn
-            ? "signed in — its desktop is starting"
-            : "sign-in started; if it does not appear, try again"
+          if result.signedIn {
+            // Held until the poller confirms the session, so the button
+            // cannot be clicked into a duplicate admin prompt.
+            awaitingSession = true
+            note = "signed in — its desktop is starting"
+          } else {
+            note = "sign-in started; if it does not appear, try again"
+          }
         } catch let e as AccountCreator.CreationError {
           if let why = e.errorDescription { note = why }
         } catch {
