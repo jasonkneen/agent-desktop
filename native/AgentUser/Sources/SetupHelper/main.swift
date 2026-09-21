@@ -121,16 +121,23 @@ private func provisionStream(home: String, uid: UInt32, port: UInt16, vncPassFil
   }
 
   let launchAgents = home + "/Library/LaunchAgents"
-  let logs = home + "/Library/Logs/mac-vnc-server"
+  let logDir = home + "/Library/Logs"
+  let logs = logDir + "/mac-vnc-server"
   do {
     try fm.createDirectory(atPath: launchAgents, withIntermediateDirectories: true,
                            attributes: [.posixPermissions: 0o755])
     try fm.createDirectory(atPath: logs, withIntermediateDirectories: true,
                            attributes: [.posixPermissions: 0o755])
-    let marker = home + "/Library"
-    guard chown(marker, uid_t(uid), 20) == 0 else {
-      warn("could not set ownership on \(marker); the account may not be able to read its own agents")
-      return
+    // Everything just made was made by root — and so was anything left behind
+    // by an earlier run, which never handed these over. The agents run as the
+    // account: a root-owned log directory makes launchd kill the server before
+    // it even starts ("could not open stdout path"), so ownership is set every
+    // time, not only when the directory was just created.
+    for dir in [home + "/Library", logDir, logs, launchAgents] {
+      guard chown(dir, uid_t(uid), 20) == 0 else {
+        warn("could not set ownership on \(dir); the account may not be able to run its agents")
+        return
+      }
     }
   } catch {
     warn("could not create \(launchAgents): \(error.localizedDescription) — stream not provisioned")
