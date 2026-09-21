@@ -179,6 +179,7 @@ struct AddAgentSheet: View {
 struct WaitingView: View {
   let agent: Agent
   var starting = false
+  var note: String?
   var onStart: () -> Void
   var onSetup: () -> Void
 
@@ -210,6 +211,14 @@ struct WaitingView: View {
       }
       .padding(.horizontal, 15).padding(.vertical, 8)
       .background(Theme.waiting.opacity(0.13), in: Capsule())
+
+      if let note {
+        Label(note, systemImage: "info.circle")
+          .font(.callout).foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+          .frame(maxWidth: 470)
+          .fixedSize(horizontal: false, vertical: true)
+      }
 
       HStack(spacing: 10) {
         Button(action: onStart) {

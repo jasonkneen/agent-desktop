@@ -279,11 +279,13 @@ final class AgentSetupModel: ObservableObject {
   @Published var note: String?
 
   let agent: Agent
+  let paths: Paths
   private let inspector: AgentInspector
   private var timer: Timer?
 
   init(agent: Agent, probe: SystemProbe = LiveProbe(), paths: Paths = Paths()) {
     self.agent = agent
+    self.paths = paths
     self.inspector = AgentInspector(probe: probe, paths: paths)
   }
 
@@ -303,6 +305,10 @@ final class AgentSetupModel: ObservableObject {
       streaming: inspector.probe.portOpen(agent.port),
       hands: inspector.hands(for: agent)
     )
+    // The stream arriving is the outcome every note below talks about; once it
+    // is here, a note still saying "should appear within seconds" is a lie in
+    // the other direction.
+    if facts.streaming { note = nil }
   }
 
   /// The helper's login path is also "make sure it is in and streaming": it
@@ -316,7 +322,17 @@ final class AgentSetupModel: ObservableObject {
     Task { @MainActor in
       do {
         _ = try await AccountCreator.signIn(account: account, port: port)
-        // No success note: the checklist ticking over IS the feedback.
+        refresh()
+        // Success is not silence. When the stream is not up yet, say where it
+        // stands — the server retries until the grant lands, and the helper
+        // log says exactly what it did. The old behaviour (nothing at all,
+        // under copy that said "starts them now") is what made a working
+        // button look broken.
+        if !facts.streaming {
+          note = facts.hands == .granted
+            ? "Installed — the stream is starting; this ticks over within seconds. If it does not, the details are in \(paths.prefix.path)/log/helper.log"
+            : "Installed — it retries every few seconds and comes up the moment Screen Recording is granted in \(agent.name)'s desktop. Details: \(paths.prefix.path)/log/helper.log"
+        }
       } catch let e as AccountCreator.CreationError {
         if let why = e.errorDescription { note = why }   // cancelled stays quiet
       } catch {
@@ -419,7 +435,9 @@ struct AgentSetupSheet: View {
         .buttonStyle(.borderedProminent)
         .disabled(setup.working)
         Text(facts.signedIn
-          ? "Signs nobody out: the helper installs the stream and this app into \(agent.name)'s session and starts them now."
+          ? (facts.hands == .granted
+               ? "Signs nobody out: the helper installs the stream and this app into \(agent.name)'s session and starts them now."
+               : "Signs nobody out: the helper installs the stream and this app into \(agent.name)'s session now. Until Screen Recording is granted in that desktop it keeps retrying, then comes up on its own — nothing more to click here.")
           : "Asks for your administrator password once. \(agent.name) then stays signed in in the background — no login screen.")
           .font(.caption).foregroundStyle(.secondary)
           .fixedSize(horizontal: false, vertical: true)

@@ -74,6 +74,9 @@ struct ViewerHost: View {
   @State private var bridge: Bridge?
   @State private var bridgeError: String?
   @State private var starting = false
+  /// What the last "Start the stream" actually did. A click that appears to do
+  /// nothing is the exact failure mode this field exists to prevent.
+  @State private var startNote: String?
 
   private var status: AgentStatus {
     agents.rows.first { $0.agent.id == agent.id }?.status ?? .waiting
@@ -88,7 +91,7 @@ struct ViewerHost: View {
       } else if status.watchable, let bridge {
         ViewerView(url: bridge.url, password: password)
       } else {
-        WaitingView(agent: agent, starting: starting, onStart: start,
+        WaitingView(agent: agent, starting: starting, note: startNote, onStart: start,
                     onSetup: { agents.watching = nil })
       }
     }
@@ -150,9 +153,21 @@ struct ViewerHost: View {
     // its LaunchAgents — the one way this account can start a process inside
     // another's session. Asks for the administrator password once.
     starting = true
+    startNote = nil
     let account = agent.account, port = agent.port
     Task { @MainActor in
-      _ = try? await AccountCreator.signIn(account: account, port: port)
+      do {
+        _ = try await AccountCreator.signIn(account: account, port: port)
+        // The port is not open yet, and that is normal: the server retries
+        // until Screen Recording is granted in that desktop. Saying so beats
+        // a silent wait that looks like a dead button.
+        startNote = "Installed. The stream keeps retrying and this view turns "
+          + "the moment it comes up. Details: \(agents.paths.prefix.path)/log/helper.log"
+      } catch let e as AccountCreator.CreationError {
+        if let why = e.errorDescription { startNote = why }   // cancelled stays quiet
+      } catch {
+        startNote = error.localizedDescription
+      }
       starting = false   // the poller turns the view the moment the port opens
     }
   }

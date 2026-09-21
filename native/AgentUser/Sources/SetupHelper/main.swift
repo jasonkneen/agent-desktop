@@ -17,6 +17,7 @@ import Darwin
 // a command line, never in a keychain the agent's own account could reach.
 
 func fail(_ reason: String) -> Never {
+  log("FAILED: " + reason)
   FileHandle.standardError.write(("agentdesktop-setup: " + reason + "\n").data(using: .utf8)!)
   exit(1)
 }
@@ -84,7 +85,32 @@ private func existingSession(uid: UInt32) -> UInt32? {
 /// A stderr warning that does not fail the run: the account and session are
 /// fine even if, say, bootstrap hit an already-loaded agent.
 func warn(_ reason: String) {
+  log("warning: " + reason)
   FileHandle.standardError.write(("agentdesktop-setup: warning: " + reason + "\n").data(using: .utf8)!)
+}
+
+/// Every run lands in <prefix>/log/helper.log: root writes it, everyone can
+/// read it, and the app points people there when something does not come up —
+/// so "nothing happened" is never the whole story. Best effort only: a logging
+/// failure must never fail a run that would otherwise work. Passwords and
+/// their files' contents never appear here.
+///
+/// nonisolated(unsafe): written once before anything logs, then read-only —
+/// same single-threaded-CLI reasoning as skyLight below.
+nonisolated(unsafe) var logPath: String?
+
+func log(_ line: String) {
+  guard let path = logPath else { return }
+  let stamp = ISO8601DateFormatter().string(from: Date())
+  let text = "\(stamp) \(line)\n"
+  let fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0o644)
+  guard fd >= 0 else { return }
+  defer { close(fd) }
+  text.withCString { raw in
+    _ = raw.withMemoryRebound(to: UInt8.self, capacity: text.utf8.count) {
+      write(fd, $0, text.utf8.count)
+    }
+  }
 }
 
 /// Writes a LaunchAgent plist into the agent's home, owned by the agent.
@@ -139,6 +165,7 @@ private func provisionStream(home: String, uid: UInt32, port: UInt16, vncPassFil
         return
       }
     }
+    log("LaunchAgents and log directories now owned by uid \(uid)")
   } catch {
     warn("could not create \(launchAgents): \(error.localizedDescription) — stream not provisioned")
     return
@@ -172,6 +199,7 @@ private func provisionStream(home: String, uid: UInt32, port: UInt16, vncPassFil
   do {
     try writeAgentPlist(serverPlist, path: launchAgents + "/com.agentdesktop.mac-vnc-server.plist", uid: uid)
     try writeAgentPlist(appPlist, path: launchAgents + "/com.agentdesktop.agentuser.plist", uid: uid)
+    log("wrote both LaunchAgents (stream on port \(port), app)")
   } catch {
     warn("could not write the LaunchAgents: \(error.localizedDescription)")
     return
@@ -180,14 +208,20 @@ private func provisionStream(home: String, uid: UInt32, port: UInt16, vncPassFil
   // The account is signed in right now — load the agents into its live
   // session rather than making the human log out and back in. Already-loaded
   // is fine: kickstart just restarts them with the new plist.
-  guard existingSession(uid: uid) != nil else { return }
+  guard existingSession(uid: uid) != nil else {
+    log("no live session for uid \(uid); the agents start at its next login")
+    return
+  }
   for label in ["com.agentdesktop.mac-vnc-server", "com.agentdesktop.agentuser"] {
     let domain = "gui/\(uid)"
     let target = domain + "/" + label
-    if runLaunchctl(["bootstrap", domain, launchAgents + "/" + label + ".plist"]) != 0 {
-      if runLaunchctl(["kickstart", "-k", target]) != 0 {
-        warn("could not load \(label) into the live session; it starts at the next login")
-      }
+    let boot = runLaunchctl(["bootstrap", domain, launchAgents + "/" + label + ".plist"])
+    if boot == 0 {
+      log("\(label): loaded into \(domain)")
+    } else if runLaunchctl(["kickstart", "-k", target]) == 0 {
+      log("\(label): bootstrap=\(boot), kickstart restarted it")
+    } else {
+      warn("could not load \(label) into the live session; it starts at the next login")
     }
   }
 }
@@ -254,6 +288,12 @@ default:
 }
 
 // ---- request validation (same rules as the app, via SetupCore) -------------
+
+// The log lives beside the pass file, so every machine layout logs the same
+// way. Set before validation: a refused request is exactly the run most worth
+// seeing in the log.
+logPath = (passFile as NSString).deletingLastPathComponent + "/log/helper.log"
+log("run: \(action) account=\(account) vncPort=\(vncPort.map(String.init) ?? "-")")
 
 guard geteuid() == 0 else {
   fail("must run as root — the app does this through the administrator prompt")
@@ -404,9 +444,11 @@ if action == "create" {
 
 let (session, confirmed): (UInt32, Bool)
 if let existing = existingSession(uid: uid) {
+  log("reusing session \(existing) for uid \(uid)")
   (session, confirmed) = (existing, true)
 } else {
   let started = try startBackgroundSession(user: user, account: account, password: password)
+  log("started session \(started.session), confirmed=\(started.confirmed)")
   (session, confirmed) = (started.session, started.confirmed)
 }
 
@@ -414,6 +456,8 @@ if let existing = existingSession(uid: uid) {
 
 if let port = vncPort, !vncPassFile.isEmpty {
   provisionStream(home: home, uid: uid, port: port, vncPassFile: vncPassFile)
+} else {
+  log("no vnc port given; LaunchAgents not provisioned")
 }
 
 // ---- report -------------------------------------------------------------------
@@ -421,6 +465,7 @@ if let port = vncPort, !vncPassFile.isEmpty {
 var result = CreationResult(account: account, uid: uid, home: home)
 result.session = session
 result.sessionConfirmed = confirmed
+log("done: account=\(account) uid=\(uid) session=\(session) confirmed=\(confirmed)")
 let encoder = JSONEncoder()
 encoder.outputFormatting = [.sortedKeys]
 let json = try! encoder.encode(result)
