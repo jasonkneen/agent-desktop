@@ -62,8 +62,11 @@ enum AccountCreator {
 
   /// Background-sign-in an existing agent account from its stored pass file.
   /// The recovery path for an account with no session (created before the
-  /// background login existed, or logged out at a restart).
-  static func signIn(account: String) async throws -> CreationResult {
+  /// background login existed, or logged out at a restart). The VNC port and
+  /// pass file ride along so the helper (re)installs the account's
+  /// LaunchAgents and loads them into the session — that is what makes a
+  /// bare account that has never been set up actually stream after login.
+  static func signIn(account: String, port: UInt16) async throws -> CreationResult {
     let helper = helperURL().path
     guard FileManager.default.isExecutableFile(atPath: helper) else {
       throw CreationError.helperMissing
@@ -74,7 +77,10 @@ enum AccountCreator {
         "No stored password for \(account). Sign it in once via the user menu, " +
         "or delete it from the list and add it again.")
     }
-    let command = "\(sh(helper)) login --account \(sh(account)) --pass-file \(sh(passFile))"
+    let vncPass = Paths().vncPassword.path
+    let command =
+      "\(sh(helper)) login --account \(sh(account)) --pass-file \(sh(passFile)) " +
+      "--vnc-port \(port) --vnc-pass-file \(sh(vncPass))"
     let script =
       "do shell script \(asl(command)) with administrator privileges " +
       "with prompt \(asl("Agent Desktop wants to sign “\(account)” in, in the background"))"
@@ -109,7 +115,7 @@ enum AccountCreator {
     }
   }
 
-  static func create(account: String, display: String) async throws -> Outcome {
+  static func create(account: String, display: String, port: UInt16) async throws -> Outcome {
     if let why = AccountName.reason(account) { throw CreationError.badName(why) }
     let helper = helperURL().path
     guard FileManager.default.isExecutableFile(atPath: helper) else {
@@ -121,7 +127,8 @@ enum AccountCreator {
 
     let command =
       "\(sh(helper)) create --account \(sh(account)) --display \(sh(display)) " +
-      "--owner-uid \(ownerUID) --pass-file \(sh(passFile))"
+      "--owner-uid \(ownerUID) --pass-file \(sh(passFile)) " +
+      "--vnc-port \(port) --vnc-pass-file \(sh(Paths().vncPassword.path))"
     let script =
       "do shell script \(asl(command)) with administrator privileges " +
       "with prompt \(asl("Agent Desktop wants to create the macOS account “\(account)”"))"

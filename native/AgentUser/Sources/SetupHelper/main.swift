@@ -23,12 +23,19 @@ func fail(_ reason: String) -> Never {
 
 let usage = """
   usage: agentdesktop-setup create --account NAME --display NAME --owner-uid N --pass-file PATH
+                                   [--vnc-port P --vnc-pass-file PATH]
          agentdesktop-setup login  --account NAME --pass-file PATH
+                                   [--vnc-port P --vnc-pass-file PATH]
 
   create: makes a standard macOS account via OpenDirectory, then starts its
           desktop session in the background (SkyLight, root-only).
   login:  signs an existing account in the same way, reading the password
-          from its pass file.
+          from its pass file. If the account already has a session, it is
+          reused rather than stacked.
+
+  With --vnc-port and --vnc-pass-file, both actions also install the
+  account's LaunchAgents (the VNC stream and the app) and load them into a
+  live session, so logging in is all it takes.
 
   Prints JSON on success: {"account":...,"uid":...,"home":...,"session":...}
   """
@@ -64,6 +71,119 @@ private func slsSessions() -> [[String: Any]] {
 private func sessionID(_ record: [String: Any]) -> UInt32? {
   (record["kCGSSessionIDKey"] as? NSNumber)?.uint32Value
 }
+private func sessionUser(_ record: [String: Any]) -> UInt32? {
+  (record["kCGSSessionUserIDKey"] as? NSNumber)?.uint32Value
+}
+/// The account's existing GUI session, if it has one. Signing in twice would
+/// stack sessions; this is also what lets `login` double as "make sure it's
+/// in and streaming".
+private func existingSession(uid: UInt32) -> UInt32? {
+  slsSessions().first(where: { sessionUser($0) == uid }).flatMap(sessionID)
+}
+
+/// A stderr warning that does not fail the run: the account and session are
+/// fine even if, say, bootstrap hit an already-loaded agent.
+func warn(_ reason: String) {
+  FileHandle.standardError.write(("agentdesktop-setup: warning: " + reason + "\n").data(using: .utf8)!)
+}
+
+/// Writes a LaunchAgent plist into the agent's home, owned by the agent.
+private func writeAgentPlist(_ plist: [String: Any], path: String, uid: UInt32) throws {
+  let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+  try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+  guard chown(path, uid_t(uid), 20) == 0 else {
+    throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+  }
+}
+
+private func runLaunchctl(_ arguments: [String]) -> Int32 {
+  let proc = Process()
+  proc.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+  proc.arguments = arguments
+  proc.standardOutput = FileHandle.nullDevice
+  proc.standardError = FileHandle.nullDevice
+  do { try proc.run() } catch { return -1 }
+  proc.waitUntilExit()
+  return proc.terminationStatus
+}
+
+/// Installs the per-user LaunchAgents that make logging in enough: the VNC
+/// stream (kept alive — it IS the desktop's eyes) and the app itself, which
+/// in the agent's account is the permissions wizard. Without these, a fresh
+/// account logs in to an empty desktop and nothing ever starts.
+private func provisionStream(home: String, uid: UInt32, port: UInt16, vncPassFile: String) {
+  let fm = FileManager.default
+  let pass = ((try? String(contentsOfFile: vncPassFile, encoding: .utf8)) ?? "")
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !pass.isEmpty else {
+    warn("the VNC password file is empty or unreadable — stream not provisioned")
+    return
+  }
+
+  let launchAgents = home + "/Library/LaunchAgents"
+  let logs = home + "/Library/Logs/mac-vnc-server"
+  do {
+    try fm.createDirectory(atPath: launchAgents, withIntermediateDirectories: true,
+                           attributes: [.posixPermissions: 0o755])
+    try fm.createDirectory(atPath: logs, withIntermediateDirectories: true,
+                           attributes: [.posixPermissions: 0o755])
+    let marker = home + "/Library"
+    guard chown(marker, uid_t(uid), 20) == 0 else {
+      warn("could not set ownership on \(marker); the account may not be able to read its own agents")
+      return
+    }
+  } catch {
+    warn("could not create \(launchAgents): \(error.localizedDescription) — stream not provisioned")
+    return
+  }
+
+  let serverPlist: [String: Any] = [
+    "Label": "com.agentdesktop.mac-vnc-server",
+    "ProgramArguments": [
+      "/Users/Shared/agensis/mac-vnc-server", "run",
+      "--bind", "127.0.0.1", "--port", String(port),
+      "--display", "1", "--encoding", "zlib",
+      "--password", pass,
+    ],
+    "WorkingDirectory": home,
+    "RunAtLoad": true,
+    "KeepAlive": true,
+    "LimitLoadToSessionType": "Aqua",
+    "ProcessType": "Interactive",
+    "EnvironmentVariables": ["HOME": home],
+    "StandardOutPath": logs + "/stdout.log",
+    "StandardErrorPath": logs + "/stderr.log",
+  ]
+  let appPlist: [String: Any] = [
+    "Label": "com.agentdesktop.agentuser",
+    "ProgramArguments": ["/Users/Shared/agensis/AgentUser.app/Contents/MacOS/AgentUser"],
+    "RunAtLoad": true,
+    "LimitLoadToSessionType": "Aqua",
+    "EnvironmentVariables": ["HOME": home],
+  ]
+
+  do {
+    try writeAgentPlist(serverPlist, path: launchAgents + "/com.agentdesktop.mac-vnc-server.plist", uid: uid)
+    try writeAgentPlist(appPlist, path: launchAgents + "/com.agentdesktop.agentuser.plist", uid: uid)
+  } catch {
+    warn("could not write the LaunchAgents: \(error.localizedDescription)")
+    return
+  }
+
+  // The account is signed in right now — load the agents into its live
+  // session rather than making the human log out and back in. Already-loaded
+  // is fine: kickstart just restarts them with the new plist.
+  guard existingSession(uid: uid) != nil else { return }
+  for label in ["com.agentdesktop.mac-vnc-server", "com.agentdesktop.agentuser"] {
+    let domain = "gui/\(uid)"
+    let target = domain + "/" + label
+    if runLaunchctl(["bootstrap", domain, launchAgents + "/" + label + ".plist"]) != 0 {
+      if runLaunchctl(["kickstart", "-k", target]) != 0 {
+        warn("could not load \(label) into the live session; it starts at the next login")
+      }
+    }
+  }
+}
 
 /// The noodle login: OD record details + the password as `UserPasswordKey`,
 /// marked as started by screen sharing, binary-plist'd, handed to SkyLight.
@@ -97,33 +217,27 @@ private func startBackgroundSession(user: ODRecord, account: String, password: S
 guard CommandLine.arguments.count >= 2 else { fputs(usage + "\n", stderr); exit(2) }
 let action = CommandLine.arguments[1]
 
-var account = "", display = "", passFile = ""
+var account = "", display = "", passFile = "", vncPassFile = ""
 var ownerUID: UInt32 = 0
+var vncPort: UInt16?
 switch action {
-case "create":
-  guard CommandLine.arguments.count == 10 else { fputs(usage + "\n", stderr); exit(2) }
+case "create", "login":
   var i = 2
-  while i < CommandLine.arguments.count {
-    let flag = CommandLine.arguments[i], value = CommandLine.arguments[i + 1]
+  let args = CommandLine.arguments
+  while i < args.count {
+    guard i + 1 < args.count else { fputs(usage + "\n", stderr); exit(2) }
+    let flag = args[i], value = args[i + 1]
     switch flag {
     case "--account": account = value
     case "--display": display = value
     case "--pass-file": passFile = value
+    case "--vnc-pass-file": vncPassFile = value
+    case "--vnc-port":
+      guard let p = UInt16(value), p > 0 else { fail("--vnc-port must be a port number") }
+      vncPort = p
     case "--owner-uid":
       guard let u = UInt32(value) else { fail("--owner-uid must be a number") }
       ownerUID = u
-    default: fail("unknown flag \(flag)\n" + usage)
-    }
-    i += 2
-  }
-case "login":
-  guard CommandLine.arguments.count == 6 else { fputs(usage + "\n", stderr); exit(2) }
-  var i = 2
-  while i < CommandLine.arguments.count {
-    let flag = CommandLine.arguments[i], value = CommandLine.arguments[i + 1]
-    switch flag {
-    case "--account": account = value
-    case "--pass-file": passFile = value
     default: fail("unknown flag \(flag)\n" + usage)
     }
     i += 2
@@ -277,8 +391,23 @@ if action == "create" {
 }
 
 // ---- the noodle part: background login, no human at a login screen ----------
+// If the account already has a session (the human just logged in at the
+// login screen, or signed in before), reuse it — creating a second one
+// would stack sessions on the account.
 
-let (session, confirmed) = try startBackgroundSession(user: user, account: account, password: password)
+let (session, confirmed): (UInt32, Bool)
+if let existing = existingSession(uid: uid) {
+  (session, confirmed) = (existing, true)
+} else {
+  let started = try startBackgroundSession(user: user, account: account, password: password)
+  (session, confirmed) = (started.session, started.confirmed)
+}
+
+// ---- make logging in enough: the stream and the app start themselves --------
+
+if let port = vncPort, !vncPassFile.isEmpty {
+  provisionStream(home: home, uid: uid, port: port, vncPassFile: vncPassFile)
+}
 
 // ---- report -------------------------------------------------------------------
 

@@ -36,17 +36,29 @@ public enum AccountName {
 /// What the app asks the helper to do. The password is deliberately absent:
 /// the helper generates it as root and writes it straight to the pass file,
 /// so it never crosses a process boundary or a command line.
+///
+/// `vncPort`/`vncPassFile` are optional: when present, the helper also
+/// installs the per-user LaunchAgents that start the stream (and the app,
+/// which in the agent's account is the permissions wizard) at every login,
+/// and bootstraps them into the account's session straight away if it is
+/// already signed in. Without them, a freshly created account logs in to an
+/// empty desktop and nothing ever starts — the gap this caused once.
 public struct CreationRequest: Codable, Equatable, Sendable {
   public var account: String
   public var display: String     // the agent's human name: "Scout"
   public var ownerUID: UInt32    // the console user; gets the pass file
   public var passFile: String
+  public var vncPort: UInt16?
+  public var vncPassFile: String?
 
-  public init(account: String, display: String, ownerUID: UInt32, passFile: String) {
+  public init(account: String, display: String, ownerUID: UInt32, passFile: String,
+              vncPort: UInt16? = nil, vncPassFile: String? = nil) {
     self.account = account
     self.display = display
     self.ownerUID = ownerUID
     self.passFile = passFile
+    self.vncPort = vncPort
+    self.vncPassFile = vncPassFile
   }
 }
 

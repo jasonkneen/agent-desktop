@@ -150,7 +150,7 @@ struct AddAgentSheet: View {
     let account = account, display = trimmedName, port = port
     Task { @MainActor in
       do {
-        let outcome = try await AccountCreator.create(account: account, display: display)
+        let outcome = try await AccountCreator.create(account: account, display: display, port: port)
         // Registered the moment it exists, so the row below is already live.
         model.add(name: display, account: outcome.result.account, port: port)
         self.outcome = outcome

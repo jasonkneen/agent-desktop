@@ -235,7 +235,7 @@ struct AgentRowView: View {
       let account = row.agent.account
       Task { @MainActor in
         do {
-          let result = try await AccountCreator.signIn(account: account)
+          let result = try await AccountCreator.signIn(account: account, port: row.agent.port)
           if result.signedIn {
             // Held until the poller confirms the session, so the button
             // cannot be clicked into a duplicate admin prompt.
