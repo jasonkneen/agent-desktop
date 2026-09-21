@@ -293,6 +293,10 @@ default:
 // way. Set before validation: a refused request is exactly the run most worth
 // seeing in the log.
 logPath = (passFile as NSString).deletingLastPathComponent + "/log/helper.log"
+// O_CREAT below makes the file, not its directory — without this, the first
+// run on a machine logs nothing at all, silently, and the note in the app
+// points at a log that does not exist.
+mkdir((logPath! as NSString).deletingLastPathComponent, 0o755)
 log("run: \(action) account=\(account) vncPort=\(vncPort.map(String.init) ?? "-")")
 
 guard geteuid() == 0 else {
