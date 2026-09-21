@@ -14,7 +14,11 @@ public struct Paths: Sendable {
   public var computerUseHost: URL { prefix.appending(path: "agensis-cu") }
   public var vncServer: URL { prefix.appending(path: "mac-vnc-server") }
   public var vncPassword: URL { prefix.appending(path: "vnc-pass") }
-  public var selfTest: URL { prefix.appending(path: "self-test.txt") }
+
+  /// The permissions receipt is per account: agent2's grants say nothing about
+  /// agent3's. The pre-registry layout was a bare `self-test.txt`, which
+  /// AgentInspector still honours for the original `agent` account.
+  public var selfTest: URL { prefix.appending(path: "self-test-\(account).txt") }
 }
 
 /// One setup step's state. `blocked` means an earlier step must land first —
@@ -49,12 +53,11 @@ public enum Step: String, CaseIterable, Sendable {
 
   /// Steps only a human can do, and why. Shown in the UI so the manual parts
   /// read as deliberate rather than as something the app failed to automate.
+  /// A desktop session is no longer on this list: the helper starts it in the
+  /// background, so nothing human stands between an account and its desktop.
   public var humanReason: String? {
     switch self {
     case .account: return "Creating a user needs admin rights."
-    case .session:
-      return "Only the real login window can start a desktop session. "
-           + "No script, SSH or screen-sharing route can do it."
     case .permissions:
       return "macOS only shows these dialogs inside the account they apply to."
     default: return nil
@@ -109,10 +112,14 @@ public extension SystemProbe {
 public struct SetupInspector: Sendable {
   let probe: SystemProbe
   let paths: Paths
+  /// The port this account's stream belongs on — each agent has its own, so a
+  /// hardcoded one would describe a different agent's desktop.
+  let port: UInt16
 
-  public init(probe: SystemProbe, paths: Paths = Paths()) {
+  public init(probe: SystemProbe, paths: Paths = Paths(), port: UInt16 = Registry.firstPort) {
     self.probe = probe
     self.paths = paths
+    self.port = port
   }
 
   public func inspect() -> SetupState {
@@ -138,15 +145,18 @@ public struct SetupInspector: Sendable {
 
     s[.permissions] = permissionState(accountExists: account, hostsInstalled: hosts)
 
-    let streamUp = probe.portOpen(5902)
+    let streamUp = probe.portOpen(port)
     if !s[.permissions]!.isDone && !streamUp {
       s[.stream] = .blocked("needs screen recording")
     } else {
-      s[.stream] = streamUp ? .done("serving on 5902") : .todo("not running")
+      s[.stream] = streamUp ? .done("serving on \(String(port))") : .todo("not running")
     }
 
-    let viewUp = probe.portOpen(6080)
-    s[.view] = viewUp ? .done("http://127.0.0.1:6080") : (streamUp ? .todo("not started") : .blocked("needs the stream"))
+    // Watching is the owner-side app's job; a serving stream is the whole
+    // requirement for it, so the stream and the view land together.
+    s[.view] = streamUp
+      ? .done("watchable from your account")
+      : (s[.permissions]!.isDone ? .todo("start the stream first") : .blocked("needs the stream"))
 
     return SetupState(steps: s)
   }

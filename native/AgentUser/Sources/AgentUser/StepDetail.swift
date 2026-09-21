@@ -38,7 +38,7 @@ struct StepDetail: View {
 
   private var session: some View {
     VStack(alignment: .leading, spacing: 12) {
-      Text("Sign the account in once. It keeps running in the background with its apps alive, and it still renders while backgrounded — which is what makes screen capture work at all.")
+      Text("Sign the account in once. Normally “Sign in” on its row does this in the background — the steps below are the fallback for when you would rather type its password yourself at the login window.")
         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       VStack(alignment: .leading, spacing: 8) {
         Label("Open the user menu at the right of the menu bar", systemImage: "1.circle.fill")
@@ -49,7 +49,7 @@ struct StepDetail: View {
       Button("Open Users & Groups") {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Users-Groups-Settings.extension")!)
       }
-      Text("After a restart you do this again. There is no way around it: only the real login window can start a session, and automatic login would make the agent the console user, which defeats the point.")
+      Text("It keeps running in the background with its apps alive, and still renders while backgrounded — which is what makes screen capture work at all. After a restart, “Sign in” on its row brings it back.")
         .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
   }
@@ -125,7 +125,7 @@ struct StepDetail: View {
     p.executableURL = model.paths.vncServer
     // zlib is not optional: noVNC's ZRLE decoder rejects this server's output
     // with "Too big index in palette" and drops the connection on frame one.
-    p.arguments = ["run", "--service", "--bind", "127.0.0.1", "--port", "5902",
+    p.arguments = ["run", "--service", "--bind", "127.0.0.1", "--port", String(model.streamPort),
                    "--display", "1", "--encoding", "zlib", "--password", pass]
     try? p.run()
     model.refresh()

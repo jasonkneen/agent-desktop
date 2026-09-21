@@ -3,11 +3,33 @@ import SwiftUI
 @MainActor
 final class WizardModel: ObservableObject {
   @Published var state = SetupState()
-  @Published var inAgentAccount = NSUserName() == Paths().account
+  @Published var inAgentAccount: Bool
 
-  let paths = Paths()
-  private let inspector = SetupInspector(probe: LiveProbe())
+  /// In an agent's account every check is about THIS account — account,
+  /// session, receipt — and its own port, from the registry. The pre-registry
+  /// "agent" name is still honoured for machines that predate the list.
+  let paths: Paths
+  let streamPort: UInt16
+  private let inspector: SetupInspector
   private var timer: Timer?
+
+  init() {
+    let me = NSUserName()
+    let inAgent = Self.runningInAgentAccount(as: me)
+    inAgentAccount = inAgent
+    paths = Paths(account: inAgent ? me : Paths().account)
+    streamPort = RegistryStore.read(prefix: Paths().prefix)?.agent(account: me)?.port
+      ?? Registry.firstPort
+    inspector = SetupInspector(probe: LiveProbe(), paths: paths, port: streamPort)
+  }
+
+  /// Am I, the app, running inside one of the managed agent accounts? Registry
+  /// membership, read-only — the sweep in `load` must never run from inside an
+  /// agent's session, where it would see other users' accounts as gone.
+  nonisolated static func runningInAgentAccount(as user: String, prefix: URL = Paths().prefix) -> Bool {
+    user == Paths().account
+      || (RegistryStore.read(prefix: prefix)?.agents.contains { $0.account == user } ?? false)
+  }
 
   func start() {
     refresh()

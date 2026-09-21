@@ -97,3 +97,22 @@ private func healthy() -> FakeProbe {
   var p = healthy(); p.executables = []
   #expect(SetupInspector(probe: p).inspect().current == .hosts)
 }
+
+/// Receipts are per agent: agent3's grants say nothing about agent's, so the
+/// file names must differ. The pre-registry bare self-test.txt stays honoured
+/// by AgentInspector for the original account.
+@Test func receiptPathsArePerAccount() {
+  #expect(Paths(account: "agent3").selfTest.path.hasSuffix("self-test-agent3.txt"))
+  #expect(Paths(account: "agent").selfTest.path.hasSuffix("self-test-agent.txt"))
+}
+
+/// Each agent streams on its own port. A wizard that checked a hardcoded one
+/// would report a streaming agent as "not running" — and start a second
+/// stream on the first agent's port.
+@Test func theStreamIsCheckedOnThisAgentsPort() {
+  var p = healthy(); p.ports = [5904]   // 5902 closed, 5904 serving
+  let s = SetupInspector(probe: p, port: 5904).inspect()
+  #expect(s[.stream].isDone)
+  #expect(s[.stream].detail.contains("5904"))
+  #expect(!SetupInspector(probe: p).inspect()[.stream].isDone)   // default port: honest
+}

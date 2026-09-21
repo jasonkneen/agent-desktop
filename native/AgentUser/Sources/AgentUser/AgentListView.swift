@@ -211,7 +211,7 @@ struct AgentRowView: View {
     } message: {
       Text("Only the list entry goes. The macOS account “\(row.agent.account)”, its files and its stored password stay — delete the account in System Settings when you are done with it, and this list drops any row whose account is gone the next time it starts.")
     }
-    .sheet(isPresented: $showingWizard) { WizardSheet(agent: row.agent) }
+    .sheet(isPresented: $showingWizard) { AgentSetupSheet(agent: row.agent, model: model) }
   }
 
   private var tint: Color {
@@ -257,19 +257,100 @@ struct AgentRowView: View {
   }
 }
 
-/// The setup wizard over an agent, as a sheet. Its own WizardModel, so it
-/// polls that account's real state while it is open.
-struct WizardSheet: View {
+/// One agent's setup, as the live facts behind a checklist. Gathered with the
+/// same probe as its row, so the sheet can never disagree with the list — and
+/// polled while open, so a sign-in started anywhere ticks it over within two
+/// seconds. Nobody should have to close and reopen a window to see progress.
+@MainActor
+final class AgentSetupModel: ObservableObject {
+  /// The four facts a setup is made of, worst first. The sheet turns them into
+  /// a checklist; the first false one is the next action.
+  struct Facts: Equatable {
+    var accountExists = false
+    var signedIn = false
+    var streaming = false
+    var hands: Hands = .unproven("permissions not granted yet")
+  }
+
+  @Published var facts = Facts()
+  /// Set while the helper is running; the button shows it rather than letting
+  /// a second click fire a second administrator prompt.
+  @Published var working = false
+  @Published var note: String?
+
   let agent: Agent
-  @StateObject private var wizard = WizardModel()
+  private let inspector: AgentInspector
+  private var timer: Timer?
+
+  init(agent: Agent, probe: SystemProbe = LiveProbe(), paths: Paths = Paths()) {
+    self.agent = agent
+    self.inspector = AgentInspector(probe: probe, paths: paths)
+  }
+
+  func start() {
+    refresh()
+    timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+      Task { @MainActor in self?.refresh() }
+    }
+  }
+
+  func stop() { timer?.invalidate(); timer = nil }
+
+  func refresh() {
+    facts = Facts(
+      accountExists: inspector.probe.userExists(agent.account),
+      signedIn: inspector.probe.hasGUISession(agent.account),
+      streaming: inspector.probe.portOpen(agent.port),
+      hands: inspector.hands(for: agent)
+    )
+  }
+
+  /// The helper's login path is also "make sure it is in and streaming": it
+  /// reuses a live session rather than stacking one, installs the account's
+  /// LaunchAgents and loads them straight away. One call covers both a
+  /// signed-out agent and a signed-in one whose stream never came up.
+  func signIn() {
+    working = true
+    note = nil
+    let account = agent.account, port = agent.port
+    Task { @MainActor in
+      do {
+        _ = try await AccountCreator.signIn(account: account, port: port)
+        // No success note: the checklist ticking over IS the feedback.
+      } catch let e as AccountCreator.CreationError {
+        if let why = e.errorDescription { note = why }   // cancelled stays quiet
+      } catch {
+        note = error.localizedDescription
+      }
+      working = false
+    }
+  }
+}
+
+/// The per-agent "Set up" sheet: that agent's real state as a live checklist,
+/// with exactly one next action. Never a generic wizard over some other
+/// account — the sheet that used to be here probed the pre-registry "agent"
+/// account and so called agents "not signed in" that plainly were.
+struct AgentSetupSheet: View {
+  let agent: Agent
+  @ObservedObject var model: AgentsModel
+  @StateObject private var setup: AgentSetupModel
   @Environment(\.dismiss) private var dismiss
+
+  init(agent: Agent, model: AgentsModel) {
+    self.agent = agent
+    self.model = model
+    _setup = StateObject(wrappedValue: AgentSetupModel(agent: agent))
+  }
+
+  private var facts: AgentSetupModel.Facts { setup.facts }
 
   var body: some View {
     VStack(spacing: 0) {
       HStack {
         VStack(alignment: .leading, spacing: 2) {
           Text("Set up \(agent.name)").font(.headline)
-          Text("account \(agent.account)")
+          Text("account \(agent.account) · port \(String(agent.port))")
             .font(.caption).foregroundStyle(.secondary)
         }
         Spacer()
@@ -278,8 +359,118 @@ struct WizardSheet: View {
       }
       .padding(.horizontal, Theme.gutter).padding(.vertical, 12)
 
-      WizardView(model: wizard)
+      Divider()
+
+      VStack(alignment: .leading, spacing: 16) {
+        checklist
+        Divider()
+        action
+      }
+      .padding(Theme.gutter)
+      .frame(maxWidth: .infinity, alignment: .leading)
     }
+    .frame(width: 520)
+    .onAppear { setup.start() }
+    .onDisappear { setup.stop() }
+  }
+
+  private var checklist: some View {
+    VStack(alignment: .leading, spacing: 14) {
+      CheckRow(done: facts.accountExists, title: "macOS account",
+               detail: facts.accountExists
+                 ? "\(agent.account) exists"
+                 : "\(agent.account) is missing")
+      CheckRow(done: facts.signedIn, title: "Signed in",
+               detail: facts.signedIn
+                 ? "its desktop is running in the background"
+                 : "not signed in")
+      CheckRow(done: facts.streaming, title: "Screen stream",
+               detail: facts.streaming
+                 ? "serving on port \(String(agent.port))"
+                 : "nothing serving on port \(String(agent.port)) yet")
+      CheckRow(done: facts.hands == .granted, title: "Permissions",
+               detail: handsDetail)
+    }
+  }
+
+  private var handsDetail: String {
+    if case .unproven(let why) = facts.hands { return why }
+    return "screen recording and accessibility granted"
+  }
+
+  /// The first thing that is not done, as one button and one sentence. When
+  /// everything is done it is Watch — setup's whole point.
+  @ViewBuilder
+  private var action: some View {
+    if !facts.accountExists {
+      Label("The macOS account is gone. Remove this row and add the agent again — its account is created fresh, with its stream already wired up.",
+            systemImage: "exclamationmark.triangle.fill")
+        .font(.callout).foregroundStyle(Theme.waiting)
+        .fixedSize(horizontal: false, vertical: true)
+    } else if !facts.signedIn || !facts.streaming {
+      VStack(alignment: .leading, spacing: 9) {
+        Button { setup.signIn() } label: {
+          if setup.working {
+            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Working…") }
+          } else {
+            Text(facts.signedIn ? "Start the stream" : "Sign in in the background")
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(setup.working)
+        Text(facts.signedIn
+          ? "Signs nobody out: the helper installs the stream and this app into \(agent.name)'s session and starts them now."
+          : "Asks for your administrator password once. \(agent.name) then stays signed in in the background — no login screen.")
+          .font(.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    } else if facts.hands == .granted {
+      Button { watch() } label: { Text("Watch \(agent.name)") }
+        .buttonStyle(.borderedProminent)
+    } else {
+      VStack(alignment: .leading, spacing: 9) {
+        Button { watch() } label: { Text("Watch \(agent.name)") }
+          .buttonStyle(.borderedProminent)
+        Text("Its desktop is streaming. Screen Recording and Accessibility can only be granted inside \(agent.name)'s account — macOS shows those dialogs only there. Switch over via the user menu and follow this app, which is running in that session asking for them.")
+          .font(.caption).foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+
+    if let note = setup.note {
+      Label(note, systemImage: "exclamationmark.triangle.fill")
+        .font(.callout).foregroundStyle(Theme.waiting)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+  }
+
+  private func watch() {
+    model.watching = agent
+    dismiss()
+  }
+}
+
+/// One line of the setup checklist: state in the icon, what was checked in the
+/// caption. No step numbers — there is exactly one thing to do at a time and
+/// the button below says which.
+private struct CheckRow: View {
+  let done: Bool
+  let title: String
+  let detail: String
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 12) {
+      Image(systemName: done ? "checkmark.circle.fill" : "circle.dashed")
+        .font(.system(size: 17))
+        .foregroundStyle(done ? Theme.done : Color.secondary)
+      VStack(alignment: .leading, spacing: 2) {
+        Text(title).font(.callout.weight(done ? .regular : .semibold))
+        Text(detail).font(.caption).foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(12)
+    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: Theme.radius))
   }
 }
 

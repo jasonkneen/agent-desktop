@@ -11,7 +11,7 @@ public enum AgentStatus: Equatable, Sendable {
 
   public var label: String {
     switch self {
-    case .notSetUp: return "SET UP"
+    case .notSetUp: return "NEEDS SETUP"
     case .signedOut: return "SIGNED OUT"
     case .waiting: return "WAITING"
     case .idle: return "IDLE"
@@ -102,7 +102,8 @@ public struct AgentInspector: Sendable {
   /// about another.
   public func hands(for agent: Agent) -> Hands {
     let receipt = paths.prefix.appending(path: "self-test-\(agent.account).txt")
-    let legacy = paths.selfTest  // the single-agent layout, before the registry
+    // The single-agent layout, before the registry, wrote a bare self-test.txt.
+    let legacy = paths.prefix.appending(path: "self-test.txt")
     let isFirst = agent.account == "agent"
     let proof = probe.contents(receipt) ?? (isFirst ? probe.contents(legacy) : nil)
     let owner = probe.fileOwner(receipt) ?? (isFirst ? probe.fileOwner(legacy) : nil)

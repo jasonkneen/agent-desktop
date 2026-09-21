@@ -42,7 +42,7 @@ struct AddAgentSheet: View {
         if let outcome {
           created(outcome)
         } else {
-          HumanBadge(reason: "Creating the account asks for your administrator password — the standard macOS prompt, once. After that, only the real login window can start its desktop, so you sign it in yourself.")
+          HumanBadge(reason: "Creating the account asks for your administrator password — the standard macOS prompt, once. After that it is signed in in the background, with no login screen and nothing to type.")
 
           if let failure {
             Label(failure, systemImage: "exclamationmark.triangle.fill")
@@ -178,6 +178,7 @@ struct AddAgentSheet: View {
 /// viewer would load a dead page and look broken.
 struct WaitingView: View {
   let agent: Agent
+  var starting = false
   var onStart: () -> Void
   var onSetup: () -> Void
 
@@ -211,7 +212,15 @@ struct WaitingView: View {
       .background(Theme.waiting.opacity(0.13), in: Capsule())
 
       HStack(spacing: 10) {
-        Button("Start the stream", action: onStart).buttonStyle(.borderedProminent)
+        Button(action: onStart) {
+          if starting {
+            HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Starting…") }
+          } else {
+            Text("Start the stream")
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(starting)
         Button("Open setup", action: onSetup)
       }
     }

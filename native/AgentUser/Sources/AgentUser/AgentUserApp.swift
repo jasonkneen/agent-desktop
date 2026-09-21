@@ -73,6 +73,7 @@ struct ViewerHost: View {
   @ObservedObject var agents: AgentsModel
   @State private var bridge: Bridge?
   @State private var bridgeError: String?
+  @State private var starting = false
 
   private var status: AgentStatus {
     agents.rows.first { $0.agent.id == agent.id }?.status ?? .waiting
@@ -87,7 +88,8 @@ struct ViewerHost: View {
       } else if status.watchable, let bridge {
         ViewerView(url: bridge.url, password: password)
       } else {
-        WaitingView(agent: agent, onStart: start, onSetup: { agents.watching = nil })
+        WaitingView(agent: agent, starting: starting, onStart: start,
+                    onSetup: { agents.watching = nil })
       }
     }
     .frame(minWidth: 900, minHeight: 620)
@@ -144,8 +146,14 @@ struct ViewerHost: View {
   }
 
   private func start() {
-    // Starting a stream means launching a process inside that account's
-    // session, which this account cannot do. Send them to the wizard there.
-    Permissions.openSettings(.screenRecording)
+    // The helper's login path reuses the account's live session and (re)loads
+    // its LaunchAgents — the one way this account can start a process inside
+    // another's session. Asks for the administrator password once.
+    starting = true
+    let account = agent.account, port = agent.port
+    Task { @MainActor in
+      _ = try? await AccountCreator.signIn(account: account, port: port)
+      starting = false   // the poller turns the view the moment the port opens
+    }
   }
 }

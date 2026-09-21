@@ -112,6 +112,14 @@ public enum RegistryStore {
     return reg
   }
 
+  /// The registry as written: no probe, no sweep, no rewrite. For code running
+  /// inside an agent's account, which must be able to look itself up without
+  /// ever deciding that the owner's rows are orphans and wiping them.
+  public static func read(prefix: URL) -> Registry? {
+    guard let data = try? Data(contentsOf: url(prefix: prefix)) else { return nil }
+    return try? JSONDecoder.registry.decode(Registry.self, from: data)
+  }
+
   @discardableResult
   public static func save(_ reg: Registry, prefix: URL) -> Bool {
     guard let data = try? JSONEncoder.registry.encode(reg) else { return false }

@@ -163,3 +163,72 @@ private func ready(_ a: Agent) -> FakeProbe {
 @Test func aSignedOutRowOffersSignIn() {
   #expect(AgentStatus.signedOut.action == "Sign in")
 }
+
+/// The badge states what is WRONG, not what to do — the button already says
+/// that. "SET UP" read as a completed state on a machine that was anything but.
+@Test func anUnfinishedAgentIsLabelledNeedsSetup() {
+  #expect(AgentStatus.notSetUp("permissions not granted yet").label == "NEEDS SETUP")
+}
+
+// MARK: - the per-agent setup sheet
+
+/// The sheet must gather with the same probe as the row, about the same agent.
+/// The sheet this model replaced checked the pre-registry "agent" account and
+/// so called signed-in agents "not signed in" — the bug this test pins down.
+@Test @MainActor func setupFactsFollowTheProbeForThatAgent() {
+  let boris = agent("agent3", port: 5904)
+  let receipt = prefix.appending(path: "self-test-agent3.txt").path
+  var p = FakeProbe()
+  p.users = ["agent3"]; p.sessions = ["agent3"]; p.ports = [5904]
+  p.owners = [receipt: "agent3"]
+  p.files = [receipt: "screenRecording=true accessibility=true"]
+
+  let m = AgentSetupModel(agent: boris, probe: p)
+  m.refresh()
+  #expect(m.facts == .init(accountExists: true, signedIn: true, streaming: true,
+                           hands: .granted))
+
+  // boris signs out — or was never really signed in. Each fact is its own
+  // check, so the stream fact must not move with it.
+  var signedOut = p; signedOut.sessions = []
+  let m2 = AgentSetupModel(agent: boris, probe: signedOut)
+  m2.refresh()
+  #expect(m2.facts.signedIn == false)
+  #expect(m2.facts.streaming == true)
+}
+
+/// The registry read used inside an agent's session must be raw: probing there
+/// sees other users' accounts as gone, and a sweep would wipe the owner's list.
+@Test func readReturnsWhatIsWrittenAndTouchesNothing() throws {
+  let dir = FileManager.default.temporaryDirectory
+    .appending(path: "agentdesktop-tests-\(UUID().uuidString)")
+  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: dir) }
+
+  var r = Registry()
+  _ = r.add(name: "A"); _ = r.add(name: "B")
+  try JSONEncoder.registry.encode(r).write(to: RegistryStore.url(prefix: dir))
+
+  let before = try Data(contentsOf: RegistryStore.url(prefix: dir))
+  #expect(RegistryStore.read(prefix: dir)?.agents.count == 2)
+  let after = try Data(contentsOf: RegistryStore.url(prefix: dir))
+  #expect(after == before)   // untouched
+}
+
+/// "Am I in an agent account" is registry membership, not the pre-registry
+/// name — agent3's session runs the app too, and it must get the wizard.
+@Test func agentAccountDetectionIsRegistryMembership() throws {
+  let dir = FileManager.default.temporaryDirectory
+    .appending(path: "agentdesktop-tests-\(UUID().uuidString)")
+  try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: dir) }
+
+  var r = Registry()
+  _ = r.add(name: "A")
+  _ = r.add(name: "Boris", account: "agent3", port: 5904)
+  try JSONEncoder.registry.encode(r).write(to: RegistryStore.url(prefix: dir))
+
+  #expect(WizardModel.runningInAgentAccount(as: "agent3", prefix: dir))
+  #expect(WizardModel.runningInAgentAccount(as: "agent", prefix: dir))   // legacy name
+  #expect(!WizardModel.runningInAgentAccount(as: "jkneen", prefix: dir))
+}
