@@ -105,6 +105,28 @@ private func healthy() -> FakeProbe {
   #expect(SetupInspector(probe: p).inspect(serverPermissions: sp)[.permissions].isDone)
 }
 
+/// The server rewrites its status every two seconds. A fresh file is its word.
+@Test func freshServerStatusIsRead() {
+  let now = Date(timeIntervalSince1970: 1_000)
+  var p = FakeProbe()
+  p.files[paths.serverStatus.path] = "server user=agent screenRecording=true postEvent=false accessibility=true\n"
+  p.times[paths.serverStatus.path] = now.addingTimeInterval(-3)
+  let sp = ServerPermissions.read(paths.serverStatus, probe: p, now: now)
+  #expect(sp?.screenRecording == true)
+  #expect(sp?.postEvent == false)
+  #expect(sp?.accessibility == true)
+}
+
+/// A stale file means a dead server. Its last word may no longer hold, so it
+/// must not tick anything.
+@Test func staleServerStatusSaysNothing() {
+  let now = Date(timeIntervalSince1970: 1_000)
+  var p = FakeProbe()
+  p.files[paths.serverStatus.path] = "server user=agent screenRecording=true postEvent=true accessibility=true\n"
+  p.times[paths.serverStatus.path] = now.addingTimeInterval(-60)
+  #expect(ServerPermissions.read(paths.serverStatus, probe: p, now: now) == nil)
+}
+
 /// The exact live failure: server could see (screen recording granted) but
 /// not click. The step must say watch-only, not done, and name the pane.
 @Test func serverThatCannotClickIsWatchOnly() {

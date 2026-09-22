@@ -19,6 +19,10 @@ public struct Paths: Sendable {
   /// agent3's. The pre-registry layout was a bare `self-test.txt`, which
   /// AgentInspector still honours for the original `agent` account.
   public var selfTest: URL { prefix.appending(path: "self-test-\(account).txt") }
+
+  /// Written by the stream server itself, every two seconds, from launchd's
+  /// context — the only place its own grants can be read from.
+  public var serverStatus: URL { prefix.appending(path: "server-status-\(account).txt") }
 }
 
 /// One setup step's state. `blocked` means an earlier step must land first —
@@ -74,6 +78,21 @@ public struct ServerPermissions: Equatable, Sendable {
   public var accessibility = false
   public init() {}
   public var allGranted: Bool { screenRecording && postEvent && accessibility }
+
+  /// Reads the server's status file. Nil when it says nothing trustworthy: no
+  /// file, or one older than `maxAge` — the server rewrites it every two
+  /// seconds, so an old one means the server is not running and its last
+  /// word may no longer be true.
+  public static func read(_ url: URL, probe: SystemProbe, now: Date = Date(),
+                          maxAge: TimeInterval = 15) -> ServerPermissions? {
+    guard let body = probe.contents(url), let written = probe.modified(url),
+          now.timeIntervalSince(written) <= maxAge else { return nil }
+    var sp = ServerPermissions()
+    sp.screenRecording = body.contains("screenRecording=true")
+    sp.postEvent = body.contains("postEvent=true")
+    sp.accessibility = body.contains("accessibility=true")
+    return sp
+  }
 }
 
 /// Everything the UI needs to decide what to show. Pure data: gathering it is

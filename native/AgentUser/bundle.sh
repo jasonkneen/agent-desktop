@@ -40,9 +40,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 
-# A stable ad-hoc signature keeps the bundle identity fixed across rebuilds, so
-# permissions granted once are not silently voided by the next build.
-codesign --force --sign - --identifier com.agentdesktop.agentuser "$APP" 2>/dev/null || \
+# An ad-hoc signature's identity is its cdhash, so every rebuild is a new app
+# to macOS and voids its grants. A real certificate's identity is identifier +
+# team, which survives rebuilds — use one when this Mac has it.
+SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null \
+  | grep -m1 -E '"(Developer ID Application|Apple Development):' | sed -E 's/.*"(.*)"/\1/')
+codesign --force --sign "${SIGN_ID:--}" --identifier com.agentdesktop.agentuser "$APP" 2>/dev/null || \
   echo "note: could not sign; permissions may need re-granting after a rebuild"
 
 echo "Built $APP"

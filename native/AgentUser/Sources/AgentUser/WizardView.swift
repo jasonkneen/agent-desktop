@@ -52,38 +52,15 @@ final class WizardModel: ObservableObject {
 
   func refresh() async {
     recordPermissions()
-    serverPermissions = await readServerPermissions()
+    // The server's own report, not a check run from here: macOS credits a
+    // check to the app that spawned it, so running `mac-vnc-server diagnose`
+    // from this app reported THIS app's grants (tccd's log confirmed it) —
+    // the same self-vouch that once showed "all approved" on a read-only view.
+    serverPermissions = inAgentAccount
+      ? ServerPermissions.read(paths.serverStatus, probe: LiveProbe())
+      : nil
     state = inspector.inspect(serverPermissions: serverPermissions)
     maybeRestartStreamServer()
-  }
-
-  /// Runs the server's read-only self-check and parses its three lines. This,
-  /// not the receipt, is what the checklist trusts when available: the server
-  /// is the process that posts the viewer's clicks, so only it can vouch for
-  /// them. ("All approved" once sat next to a read-only view because the app
-  /// vouched for itself instead.)
-  private func readServerPermissions() async -> ServerPermissions? {
-    guard inAgentAccount else { return nil }
-    let binary = paths.vncServer
-    return await Task.detached(priority: .utility) { () -> ServerPermissions? in
-      let p = Process()
-      p.executableURL = binary
-      p.arguments = ["diagnose"]
-      let out = Pipe()
-      p.standardOutput = out
-      p.standardError = FileHandle.nullDevice
-      do { try p.run() } catch { return nil }
-      let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-      p.waitUntilExit()
-      guard p.terminationStatus == 0 else { return nil }
-      var sp = ServerPermissions()
-      for line in text.split(separator: "\n") {
-        if line.hasPrefix("Screen Recording:"), line.hasSuffix("granted") { sp.screenRecording = true }
-        if line.hasPrefix("Post Event:"), line.hasSuffix("granted") { sp.postEvent = true }
-        if line.hasPrefix("Accessibility:"), line.hasSuffix("granted") { sp.accessibility = true }
-      }
-      return sp
-    }.value
   }
 
   /// macOS applies a new input-posting grant only to processes started AFTER

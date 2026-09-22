@@ -63,6 +63,44 @@ enum Permissions {
         }
     }
 
+    /// The request returns at once; the dialog belongs to tccd and dies with
+    /// the process that asked. Exiting straight into a capture that cannot
+    /// start yet made launchd respawn it every ten seconds, so the dialog
+    /// flashed and vanished before anyone could click it. Stay alive until
+    /// Screen Recording lands. After five minutes, exit anyway: a fresh process
+    /// re-asks, in case this one's preflight answer went stale.
+    static func waitForScreenRecording(logger: ServerLogger) async {
+        let started = Date()
+        while !CGPreflightScreenCaptureAccess() {
+            if Date().timeIntervalSince(started) > 300 {
+                logger.info("still no Screen Recording after 5 minutes — restarting to ask again")
+                Foundation.exit(0)
+            }
+            try? await Task.sleep(for: .seconds(2))
+        }
+        logger.info("Screen Recording granted — starting capture")
+    }
+
+    /// The server's own grants, written where the setup app can read them.
+    /// Only this process can report them: a checker the app spawns is credited
+    /// to the app, so it reports the app's grants (tccd's log showed exactly
+    /// that — every such check had the app as its subject). Written every tick
+    /// so the file's age says whether the server is alive.
+    static func startStatusReporter() {
+        guard let dir = Bundle.main.executableURL?.resolvingSymlinksInPath().deletingLastPathComponent() else {
+            return
+        }
+        let file = dir.appending(path: "server-status-\(NSUserName()).txt")
+        Task.detached(priority: .utility) {
+            while true {
+                let body = "server user=\(NSUserName()) screenRecording=\(CGPreflightScreenCaptureAccess()) "
+                    + "postEvent=\(CGPreflightPostEventAccess()) accessibility=\(AXIsProcessTrusted())\n"
+                try? body.write(to: file, atomically: true, encoding: .utf8)
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+
     private static func printStatus(screenReady: Bool, eventReady: Bool, accessibilityReady: Bool) {
         print("Screen Recording: \(screenReady ? "granted" : "missing")")
         print("Post Event:       \(eventReady ? "granted" : "missing")")

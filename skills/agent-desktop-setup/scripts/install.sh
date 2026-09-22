@@ -40,13 +40,19 @@ echo "Building agentdesktop-setup (the account-creation helper)..."
 # account creation the wizard asks for.
 install -m 755 "$HERE/native/AgentUser/.build/release/agentdesktop-setup" "$PREFIX/agentdesktop-setup"
 
-echo "Signing with stable identifiers..."
-# Ad-hoc signatures with fixed identifiers: macOS keys TCC permission grants
-# to the code identity, so re-running this script after an edit no longer
-# voids the user's Screen Recording / Accessibility grants.
-codesign --force --sign - --identifier com.agentdesktop.agensis-cu     "$PREFIX/agensis-cu"
-codesign --force --sign - --identifier com.agentdesktop.mac-vnc-server "$PREFIX/mac-vnc-server"
-codesign --force --sign - --identifier com.agentdesktop.setup          "$PREFIX/agentdesktop-setup"
+echo "Signing..."
+# macOS keys TCC grants to the code's designated requirement. An ad-hoc
+# signature's requirement is its cdhash — the exact build — so every rebuild
+# voided the grants no matter how fixed the identifier (tccd logs it as
+# "Failed to match existing code requirement"). A real certificate's
+# requirement is identifier + team, which survives rebuilds. Use one if this
+# Mac has it; ad-hoc is the fallback, and means re-granting after each build.
+SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null \
+  | grep -m1 -E '"(Developer ID Application|Apple Development):' | sed -E 's/.*"(.*)"/\1/')
+[ -n "$SIGN_ID" ] || { SIGN_ID="-"; echo "note: no signing certificate — ad-hoc, grants will not survive a rebuild"; }
+codesign --force --sign "$SIGN_ID" --identifier com.agentdesktop.agensis-cu     "$PREFIX/agensis-cu"
+codesign --force --sign "$SIGN_ID" --identifier com.agentdesktop.mac-vnc-server "$PREFIX/mac-vnc-server"
+codesign --force --sign "$SIGN_ID" --identifier com.agentdesktop.setup          "$PREFIX/agentdesktop-setup"
 
 if [ ! -f "$PREFIX/vnc-pass" ]; then
   LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12 > "$PREFIX/vnc-pass"
