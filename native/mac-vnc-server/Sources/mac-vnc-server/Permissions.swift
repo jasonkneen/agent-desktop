@@ -1,5 +1,6 @@
 import ApplicationServices
 import Foundation
+import ScreenCaptureKit
 
 enum Permissions {
     static func printAndRequest() {
@@ -71,6 +72,13 @@ enum Permissions {
     /// re-asks, in case this one's preflight answer went stale.
     static func waitForScreenRecording(logger: ServerLogger) async {
         let started = Date()
+        // CGRequestScreenCaptureAccess alone never made tccd post a dialog for
+        // this server; the one it posted came from a capture-side query
+        // (ScreenCaptureKit, via replayd). So make that query once, then stay
+        // alive: the dialog is held open for as long as this process lives.
+        if !CGPreflightScreenCaptureAccess() {
+            _ = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        }
         while !CGPreflightScreenCaptureAccess() {
             if Date().timeIntervalSince(started) > 300 {
                 logger.info("still no Screen Recording after 5 minutes — restarting to ask again")
