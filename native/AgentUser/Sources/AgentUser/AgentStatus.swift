@@ -110,7 +110,7 @@ public struct AgentInspector: Sendable {
 
     guard let proof else { return .unproven("permissions not granted yet") }
     guard owner == agent.account else {
-      return .unproven("the receipt was not written by \(agent.account)")
+      return .unproven("permissions were last checked from a different account than \(agent.account)")
     }
     guard proof.contains("screenRecording=true"), proof.contains("accessibility=true") else {
       return .unproven("a permission is denied")

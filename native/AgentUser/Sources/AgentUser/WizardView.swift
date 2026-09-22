@@ -41,7 +41,25 @@ final class WizardModel: ObservableObject {
   }
 
   func stop() { timer?.invalidate(); timer = nil }
-  func refresh() { state = inspector.inspect() }
+
+  func refresh() {
+    recordPermissions()
+    state = inspector.inspect()
+  }
+
+  /// Permissions are only readable inside this account, so the poller records
+  /// them as it goes: the owner's list ticks over the moment the grants land,
+  /// with nothing for a human to click. Only changes are written, so the file's
+  /// date keeps meaning "when the truth last changed" — the owner side compares
+  /// it with a rebuilt host binary to catch voided grants.
+  private func recordPermissions() {
+    guard inAgentAccount else { return }
+    let s = Permissions.status()
+    let body = "self-test user=\(NSUserName()) screenRecording=\(s.screenRecording) accessibility=\(s.accessibility)\n"
+    if (try? String(contentsOf: paths.selfTest, encoding: .utf8)) != body {
+      try? body.write(to: paths.selfTest, atomically: true, encoding: .utf8)
+    }
+  }
 }
 
 struct WizardView: View {

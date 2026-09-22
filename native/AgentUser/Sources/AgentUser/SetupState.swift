@@ -171,7 +171,7 @@ public struct SetupInspector: Sendable {
       return .todo("unproven — run the agent-side wizard")
     }
     guard probe.fileOwner(paths.selfTest) == paths.account else {
-      return .todo("receipt was not written by '\(paths.account)' — it proves nothing")
+      return .todo("permissions were checked from a different account than '\(paths.account)' — it proves nothing")
     }
     guard body.contains("screenRecording=true"), body.contains("accessibility=true") else {
       return .todo("a permission is denied")

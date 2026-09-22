@@ -68,13 +68,10 @@ struct StepDetail: View {
   private var permissions: some View {
     VStack(alignment: .leading, spacing: 14) {
       if model.inAgentAccount {
-        Text("Grant Screen Recording and Accessibility. Asking here makes macOS show the dialogs directly.")
+        Text("Grant Screen Recording and Accessibility. Asking here makes macOS show the dialogs directly. Both this list and the owner's tick over on their own as soon as macOS records them — nothing else to click here.")
           .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        HStack(spacing: 10) {
-          Button("Request permissions") { Permissions.request() }
-            .buttonStyle(.borderedProminent)
-          Button("Write the receipt") { writeReceipt() }
-        }
+        Button("Request permissions") { Permissions.request() }
+          .buttonStyle(.borderedProminent)
         Divider().padding(.vertical, 2)
         Text("If either one will not stick, add the binary by hand — macOS hides plain executables from these lists until one is dragged in:")
           .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -109,13 +106,6 @@ struct StepDetail: View {
           .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       }
     }
-  }
-
-  private func writeReceipt() {
-    let s = Permissions.status()
-    let body = "self-test user=\(NSUserName()) screenRecording=\(s.screenRecording) accessibility=\(s.accessibility)\n"
-    try? body.write(to: model.paths.selfTest, atomically: true, encoding: .utf8)
-    model.refresh()
   }
 
   private func startStream() {
