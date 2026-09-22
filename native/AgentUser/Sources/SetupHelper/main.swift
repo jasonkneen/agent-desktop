@@ -188,6 +188,31 @@ private func provisionStream(home: String, uid: UInt32, port: UInt16, vncPassFil
     "StandardOutPath": logs + "/stdout.log",
     "StandardErrorPath": logs + "/stderr.log",
   ]
+  // The hands: launchd listens on a socket and starts agensis-cu per
+  // connection, inside this session. launchd as the parent is what makes
+  // macOS credit agensis-cu's grants to agensis-cu itself — spawned by an
+  // agent's node/claude it would borrow THAT app's grants instead. An agent
+  // connects with `nc -U <socket>` as its MCP command. --no-prompt: a
+  // connection must never pop a permission dialog at whoever is working.
+  // Access control is the directory (staff, 0750); launchd creates the
+  // socket as group wheel whatever the directory says, hence mode 0666.
+  let cuSocketDir = "/Users/Shared/agensis/cu"
+  try? fm.createDirectory(atPath: cuSocketDir, withIntermediateDirectories: true)
+  if chown(cuSocketDir, 0, 20) != 0 || chmod(cuSocketDir, 0o750) != 0 {
+    warn("could not set up \(cuSocketDir); the computer-use socket may be unreachable")
+  }
+  let cuPlist: [String: Any] = [
+    "Label": "com.agentdesktop.cu",
+    "ProgramArguments": ["/Users/Shared/agensis/agensis-cu", "--no-prompt"],
+    "Sockets": ["Listeners": [
+      "SockPathName": cuSocketDir + "/" + (home as NSString).lastPathComponent + ".sock",
+      "SockPathMode": 0o666,
+    ]],
+    "inetdCompatibility": ["Wait": false],
+    "LimitLoadToSessionType": "Aqua",
+    "ProcessType": "Interactive",
+    "StandardErrorPath": logDir + "/agensis-cu.log",
+  ]
   let appPlist: [String: Any] = [
     "Label": "com.agentdesktop.agentuser",
     "ProgramArguments": ["/Users/Shared/agensis/AgentUser.app/Contents/MacOS/AgentUser"],
@@ -199,7 +224,8 @@ private func provisionStream(home: String, uid: UInt32, port: UInt16, vncPassFil
   do {
     try writeAgentPlist(serverPlist, path: launchAgents + "/com.agentdesktop.mac-vnc-server.plist", uid: uid)
     try writeAgentPlist(appPlist, path: launchAgents + "/com.agentdesktop.agentuser.plist", uid: uid)
-    log("wrote both LaunchAgents (stream on port \(port), app)")
+    try writeAgentPlist(cuPlist, path: launchAgents + "/com.agentdesktop.cu.plist", uid: uid)
+    log("wrote the LaunchAgents (stream on port \(port), app, computer-use socket)")
   } catch {
     warn("could not write the LaunchAgents: \(error.localizedDescription)")
     return
@@ -212,7 +238,7 @@ private func provisionStream(home: String, uid: UInt32, port: UInt16, vncPassFil
     log("no live session for uid \(uid); the agents start at its next login")
     return
   }
-  for label in ["com.agentdesktop.mac-vnc-server", "com.agentdesktop.agentuser"] {
+  for label in ["com.agentdesktop.mac-vnc-server", "com.agentdesktop.agentuser", "com.agentdesktop.cu"] {
     let domain = "gui/\(uid)"
     let target = domain + "/" + label
     let boot = runLaunchctl(["bootstrap", domain, launchAgents + "/" + label + ".plist"])

@@ -85,6 +85,9 @@ struct StepDetail: View {
           Button("Control + hands host") {
             Permissions.stageDrag(model.paths.computerUseHost, into: .accessibility)
           }
+          Button("Screen Recording + hands host") {
+            Permissions.stageDrag(model.paths.computerUseHost, into: .screenRecording)
+          }
         }
         Text("Two tools can move this desktop's mouse and keyboard: the stream server — it is what carries your clicks from the viewer, and without its Device Control and Data Access toggle the view is read-only — and the hands host. Each needs its own toggle.")
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
