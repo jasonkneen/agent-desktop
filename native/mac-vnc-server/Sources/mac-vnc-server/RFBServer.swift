@@ -901,11 +901,18 @@ final class RFBClientSession: @unchecked Sendable {
         }
     }
 
-    private func desktopSizeResponse(for framebuffer: Framebuffer) -> [UInt8] {
-        [0, 0]
-            + UInt16(framebuffer.width).beBytes
-            + UInt16(framebuffer.height).beBytes
+    /// One rect header: x, y, width, height, encoding — 12 bytes. It used to
+    /// write x but not y, so every byte after a resize was two bytes out and
+    /// noVNC read garbage and dropped the connection.
+    static func desktopSizeResponse(width: Int, height: Int) -> [UInt8] {
+        [0, 0, 0, 0]
+            + UInt16(width).beBytes
+            + UInt16(height).beBytes
             + UInt32(bitPattern: RFBPseudoEncoding.desktopSize).beBytes
+    }
+
+    private func desktopSizeResponse(for framebuffer: Framebuffer) -> [UInt8] {
+        Self.desktopSizeResponse(width: framebuffer.width, height: framebuffer.height)
     }
 
     private func consumeWriterError() -> Error? {

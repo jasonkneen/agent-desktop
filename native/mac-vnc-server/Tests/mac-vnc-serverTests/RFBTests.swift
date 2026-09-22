@@ -1040,3 +1040,12 @@ private func inflatePayloads(_ payloads: [[UInt8]], outputCounts: [Int]) throws 
     }
     return result
 }
+
+/// A resize is one rect header: x, y, width, height, encoding — 12 bytes.
+/// It once omitted y; every byte after a resize was then two bytes out and
+/// noVNC dropped the connection back to its connect screen.
+@Test func desktopSizeRectHeaderIsTwelveBytes() {
+    let bytes = RFBClientSession.desktopSizeResponse(width: 1134, height: 737)
+    #expect(bytes.count == 12)
+    #expect(bytes == [0, 0, 0, 0, 0x04, 0x6E, 0x02, 0xE1, 0xFF, 0xFF, 0xFF, 0x21])
+}
