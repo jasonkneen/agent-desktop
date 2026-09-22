@@ -68,9 +68,9 @@ struct StepDetail: View {
   private var permissions: some View {
     VStack(alignment: .leading, spacing: 14) {
       if model.inAgentAccount {
-        Text("Grant Screen Recording and Accessibility. Asking here makes macOS show the dialogs directly. Both this list and the owner's tick over on their own as soon as macOS records them — nothing else to click here.")
+        Text("Grant Screen Recording and Device Control and Data Access — that second one is the click-and-type permission (older Macs call it Accessibility). One click asks for both, and the stream server asks for itself, so every dialog names the tool that actually needs it. The list ticks over on its own the moment macOS records them.")
           .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        Button("Request permissions") { Permissions.request() }
+        Button("Request permissions") { requestPermissions() }
           .buttonStyle(.borderedProminent)
         Divider().padding(.vertical, 2)
         Text("If a toggle will not stick, add the tool by hand — macOS hides plain executables from these lists until one is dragged in:")
@@ -79,14 +79,14 @@ struct StepDetail: View {
           Button("Screen Recording + stream") {
             Permissions.stageDrag(model.paths.vncServer, into: .screenRecording)
           }
-          Button("Accessibility + stream") {
+          Button("Control + stream") {
             Permissions.stageDrag(model.paths.vncServer, into: .accessibility)
           }
-          Button("Accessibility + hands host") {
+          Button("Control + hands host") {
             Permissions.stageDrag(model.paths.computerUseHost, into: .accessibility)
           }
         }
-        Text("Two tools can move this desktop's mouse and keyboard: the stream server — it is what carries your clicks from the viewer, and without its Accessibility toggle the view is read-only — and the hands host. Each needs its own toggle.")
+        Text("Two tools can move this desktop's mouse and keyboard: the stream server — it is what carries your clicks from the viewer, and without its Device Control and Data Access toggle the view is read-only — and the hands host. Each needs its own toggle.")
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       } else {
         Text("These are per-account, and macOS only shows the dialogs inside the account they apply to. Switch to \(model.paths.account.capitalized) and run this same app there — it will be waiting on this step.")
@@ -111,6 +111,21 @@ struct StepDetail: View {
     }
   }
 
+  /// Both askers in one click: the app (so it can keep checking and writing
+  /// the receipt) and the stream server binary itself — macOS attributes a
+  /// permission request to the binary that asks, so letting the server ask is
+  /// what makes the grant cover the thing the viewer's clicks depend on.
+  /// Never wait for it: the child lives exactly as long as the dialogs do.
+  private func requestPermissions() {
+    Permissions.request()
+    let p = Process()
+    p.executableURL = model.paths.vncServer
+    p.arguments = ["permissions"]
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try? p.run()
+  }
+
   private func startStream() {
     let pass = (try? String(contentsOf: model.paths.vncPassword, encoding: .utf8))?
       .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -121,6 +136,6 @@ struct StepDetail: View {
     p.arguments = ["run", "--service", "--bind", "127.0.0.1", "--port", String(model.streamPort),
                    "--display", "1", "--encoding", "zlib", "--password", pass]
     try? p.run()
-    model.refresh()
+    Task { await model.refresh() }
   }
 }

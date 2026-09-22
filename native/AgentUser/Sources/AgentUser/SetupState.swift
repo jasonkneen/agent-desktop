@@ -65,6 +65,17 @@ public enum Step: String, CaseIterable, Sendable {
   }
 }
 
+/// The stream server's own permission truth, asked of the binary itself in
+/// the agent's session. The receipt file can only vouch for the app that
+/// wrote it — which is how "all approved" once sat next to a read-only view.
+public struct ServerPermissions: Equatable, Sendable {
+  public var screenRecording = false
+  public var postEvent = false
+  public var accessibility = false
+  public init() {}
+  public var allGranted: Bool { screenRecording && postEvent && accessibility }
+}
+
 /// Everything the UI needs to decide what to show. Pure data: gathering it is
 /// someone else's job, so this is trivially testable.
 public struct SetupState: Sendable {
@@ -122,7 +133,7 @@ public struct SetupInspector: Sendable {
     self.port = port
   }
 
-  public func inspect() -> SetupState {
+  public func inspect(serverPermissions: ServerPermissions? = nil) -> SetupState {
     var s: [Step: StepState] = [:]
 
     let account = probe.userExists(paths.account)
@@ -143,7 +154,8 @@ public struct SetupInspector: Sendable {
       ? .done("agensis-cu and mac-vnc-server installed")
       : .todo("not built yet")
 
-    s[.permissions] = permissionState(accountExists: account, hostsInstalled: hosts)
+    s[.permissions] = permissionState(accountExists: account, hostsInstalled: hosts,
+                                      serverPermissions: serverPermissions)
 
     let streamUp = probe.portOpen(port)
     if !s[.permissions]!.isDone && !streamUp {
@@ -165,8 +177,25 @@ public struct SetupInspector: Sendable {
   /// so the agent side writes a receipt we verify here. Two things make a
   /// receipt worthless: the wrong author, and a host binary newer than it —
   /// macOS ties TCC grants to the binary's signature, so a rebuild voids them.
-  private func permissionState(accountExists: Bool, hostsInstalled: Bool) -> StepState {
+  ///
+  /// When the server's own preflight is available (the wizard running in the
+  /// agent's account can ask it), that outranks the receipt: the server is the
+  /// process that posts the viewer's clicks, and only it can vouch for that.
+  private func permissionState(accountExists: Bool, hostsInstalled: Bool,
+                               serverPermissions: ServerPermissions?) -> StepState {
     guard accountExists, hostsInstalled else { return .blocked("needs the account and hosts") }
+    if let sp = serverPermissions {
+      guard sp.screenRecording else {
+        return .todo("the stream server still needs Screen Recording")
+      }
+      guard sp.accessibility else {
+        return .todo("the stream server still needs Device Control and Data Access in System Settings — until then the view is watch-only")
+      }
+      guard sp.postEvent else {
+        return .todo("the stream server can see but not click yet; it restarts itself the moment this clears")
+      }
+      return .done("screen recording and control granted to the stream server")
+    }
     guard let body = probe.contents(paths.selfTest) else {
       return .todo("unproven — run the agent-side wizard")
     }

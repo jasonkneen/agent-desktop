@@ -85,6 +85,37 @@ private func healthy() -> FakeProbe {
   #expect(s[.permissions].detail.contains("unproven"))
 }
 
+/// The server's own self-check outranks the receipt — the fix for "all
+/// approved" sitting next to a read-only view. When the binary reports
+/// directly, a flattering receipt counts for nothing.
+@Test func serverSelfCheckOverridesAFlatteringReceipt() {
+  var p = healthy()
+  p.files[paths.selfTest.path] = "screenRecording=true accessibility=true"   // the app vouching
+  var sp = ServerPermissions()
+  sp.screenRecording = false   // the server, the one that matters: cannot even capture
+  #expect(!SetupInspector(probe: p).inspect(serverPermissions: sp)[.permissions].isDone)
+}
+
+/// Same shape, the good direction: everything the server reports is granted,
+/// so the step is done even when the receipt never landed.
+@Test func serverSelfCheckAloneProvesTheGrants() {
+  var p = healthy(); p.files = [:]
+  var sp = ServerPermissions()
+  sp.screenRecording = true; sp.postEvent = true; sp.accessibility = true
+  #expect(SetupInspector(probe: p).inspect(serverPermissions: sp)[.permissions].isDone)
+}
+
+/// The exact live failure: server could see (screen recording granted) but
+/// not click. The step must say watch-only, not done, and name the pane.
+@Test func serverThatCannotClickIsWatchOnly() {
+  var sp = ServerPermissions()
+  sp.screenRecording = true; sp.postEvent = true
+  let s = SetupInspector(probe: healthy()).inspect(serverPermissions: sp)
+  #expect(!s[.permissions].isDone)
+  #expect(s[.permissions].detail.contains("watch-only"))
+  #expect(s[.permissions].detail.contains("Device Control and Data Access"))
+}
+
 @Test func streamIsBlockedUntilPermissionsLand() {
   var p = healthy(); p.files = [:]; p.ports = []
   let s = SetupInspector(probe: p).inspect()

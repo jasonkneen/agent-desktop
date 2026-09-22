@@ -4,6 +4,10 @@ import SwiftUI
 final class WizardModel: ObservableObject {
   @Published var state = SetupState()
   @Published var inAgentAccount: Bool
+  /// The stream server's own answer, asked of the binary itself. Nil when it
+  /// cannot be asked (not in the agent account, or the binary will not run) —
+  /// then the checklist falls back to the receipt file.
+  @Published var serverPermissions: ServerPermissions?
 
   /// In an agent's account every check is about THIS account — account,
   /// session, receipt — and its own port, from the registry. The pre-registry
@@ -12,6 +16,10 @@ final class WizardModel: ObservableObject {
   let streamPort: UInt16
   private let inspector: SetupInspector
   private var timer: Timer?
+  /// One kickstart per app launch: the first time the server reports all
+  /// three grants it gets restarted, and never again from this run. A fresh
+  /// launch (next login) re-arms it naturally.
+  private var restartedStreamServerAfterGrants = false
 
   init() {
     let me = NSUserName()
@@ -32,19 +40,66 @@ final class WizardModel: ObservableObject {
   }
 
   func start() {
-    refresh()
+    Task { await refresh() }
     // Polling rather than a Done button: the check is the truth, so a step
     // ticks over when it is actually true, never because someone said so.
     timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-      Task { @MainActor in self?.refresh() }
+      Task { @MainActor in await self?.refresh() }
     }
   }
 
   func stop() { timer?.invalidate(); timer = nil }
 
-  func refresh() {
+  func refresh() async {
     recordPermissions()
-    state = inspector.inspect()
+    serverPermissions = await readServerPermissions()
+    state = inspector.inspect(serverPermissions: serverPermissions)
+    maybeRestartStreamServer()
+  }
+
+  /// Runs the server's read-only self-check and parses its three lines. This,
+  /// not the receipt, is what the checklist trusts when available: the server
+  /// is the process that posts the viewer's clicks, so only it can vouch for
+  /// them. ("All approved" once sat next to a read-only view because the app
+  /// vouched for itself instead.)
+  private func readServerPermissions() async -> ServerPermissions? {
+    guard inAgentAccount else { return nil }
+    let binary = paths.vncServer
+    return await Task.detached(priority: .utility) { () -> ServerPermissions? in
+      let p = Process()
+      p.executableURL = binary
+      p.arguments = ["diagnose"]
+      let out = Pipe()
+      p.standardOutput = out
+      p.standardError = FileHandle.nullDevice
+      do { try p.run() } catch { return nil }
+      let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+      p.waitUntilExit()
+      guard p.terminationStatus == 0 else { return nil }
+      var sp = ServerPermissions()
+      for line in text.split(separator: "\n") {
+        if line.hasPrefix("Screen Recording:"), line.hasSuffix("granted") { sp.screenRecording = true }
+        if line.hasPrefix("Post Event:"), line.hasSuffix("granted") { sp.postEvent = true }
+        if line.hasPrefix("Accessibility:"), line.hasSuffix("granted") { sp.accessibility = true }
+      }
+      return sp
+    }.value
+  }
+
+  /// macOS applies a new input-posting grant only to processes started AFTER
+  /// the grant, so an already-running server stays watch-only until it comes
+  /// back. The moment the server reports everything granted, the wizard
+  /// restarts it itself, in this account's own domain — no admin password.
+  private func maybeRestartStreamServer() {
+    guard inAgentAccount, serverPermissions?.allGranted == true,
+          !restartedStreamServerAfterGrants else { return }
+    restartedStreamServerAfterGrants = true
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    p.arguments = ["kickstart", "-k", "gui/\(getuid())", "com.agentdesktop.mac-vnc-server"]
+    p.standardOutput = FileHandle.nullDevice
+    p.standardError = FileHandle.nullDevice
+    try? p.run()   // fire and forget: if the job is not loaded, the Start button still exists
   }
 
   /// Permissions are only readable inside this account, so the poller records
