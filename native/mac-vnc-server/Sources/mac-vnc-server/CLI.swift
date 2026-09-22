@@ -124,6 +124,15 @@ enum CLICommand {
 
     private static func runServer(config: ServerConfig, capture: FramebufferSource? = nil) async throws {
         let logger = ServerLogger(verbose: config.verbose)
+        // Ask before anything that needs the grants. The ask only counts when
+        // this process is responsible for itself (launchd, not some app's
+        // child) — see Permissions.isOwnResponsibleProcess. Once granted, a
+        // process started BEFORE the grant still cannot post input, which the
+        // wizard's restart-after-grant covers.
+        if Permissions.isOwnResponsibleProcess, Permissions.anythingMissing {
+            logger.info("permissions missing — asking as itself; prompts appear on this desktop")
+            Permissions.requestMissing()
+        }
         let captureSource: FramebufferSource
         if let capture {
             captureSource = capture

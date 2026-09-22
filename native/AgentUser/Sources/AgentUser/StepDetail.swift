@@ -68,7 +68,7 @@ struct StepDetail: View {
   private var permissions: some View {
     VStack(alignment: .leading, spacing: 14) {
       if model.inAgentAccount {
-        Text("Grant Screen Recording and Device Control and Data Access — that second one is the click-and-type permission (older Macs call it Accessibility). One click asks for both, and the stream server asks for itself, so every dialog names the tool that actually needs it. The list ticks over on its own the moment macOS records them.")
+        Text("Grant Screen Recording and Device Control and Data Access — that second one is the click-and-type permission (older Macs call it Accessibility). One click restarts the stream server, and its first act is to ask for what it lacks: the dialogs appear on this desktop, name the server itself, and approving them grants the tool that actually carries your clicks. The list ticks over the moment macOS records them, and the server restarts itself so control takes effect — nothing else to click.")
           .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         Button("Request permissions") { requestPermissions() }
           .buttonStyle(.borderedProminent)
@@ -111,19 +111,23 @@ struct StepDetail: View {
     }
   }
 
-  /// Both askers in one click: the app (so it can keep checking and writing
-  /// the receipt) and the stream server binary itself — macOS attributes a
-  /// permission request to the binary that asks, so letting the server ask is
-  /// what makes the grant cover the thing the viewer's clicks depend on.
-  /// Never wait for it: the child lives exactly as long as the dialogs do.
+  /// The ask must be credited to the stream server binary, and macOS credits a
+  /// permission request to the *responsible* process — a child spawned here
+  /// would inherit this app, so its dialogs would grant the app and the view
+  /// would stay read-only (this exact trap cost a day). Under launchd the
+  /// server stands alone, and its first act on start is to ask as itself. So
+  /// this button just restarts it; the prompts that follow are the server's
+  /// own, and approving them actually grants it.
   private func requestPermissions() {
-    Permissions.request()
     let p = Process()
-    p.executableURL = model.paths.vncServer
-    p.arguments = ["permissions"]
+    p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+    p.arguments = ["kickstart", "-k", "gui/\(getuid())", "com.agentdesktop.mac-vnc-server"]
     p.standardOutput = FileHandle.nullDevice
     p.standardError = FileHandle.nullDevice
     try? p.run()
+    p.waitUntilExit()
+    // A server the launchd job does not manage cannot be asked correctly from
+    // here at all — the staging buttons below are the honest path for that.
   }
 
   private func startStream() {
