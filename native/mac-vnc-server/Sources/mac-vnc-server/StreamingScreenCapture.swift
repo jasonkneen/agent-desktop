@@ -297,7 +297,11 @@ final class StreamingScreenCapture: @unchecked Sendable, FramebufferSource, Fram
                 config.pixelFormat = kCVPixelFormatType_32BGRA
                 config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
                 config.queueDepth = 3
-                config.showsCursor = false
+                // Drawn into the frames: the server never sends a cursor
+                // shape, and noVNC hides the local pointer, so without this
+                // the viewer shows no pointer at all — neither yours nor the
+                // agent's, which is the one a watcher most needs to see.
+                config.showsCursor = true
 
                 let delegate = ScreenCaptureStreamDelegate(eventSink: eventSink)
                 let stream = SCStream(filter: filter, configuration: config, delegate: delegate)
