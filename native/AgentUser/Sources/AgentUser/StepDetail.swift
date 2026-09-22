@@ -73,17 +73,20 @@ struct StepDetail: View {
         Button("Request permissions") { Permissions.request() }
           .buttonStyle(.borderedProminent)
         Divider().padding(.vertical, 2)
-        Text("If either one will not stick, add the binary by hand — macOS hides plain executables from these lists until one is dragged in:")
+        Text("If a toggle will not stick, add the tool by hand — macOS hides plain executables from these lists until one is dragged in:")
           .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         HStack(spacing: 10) {
-          Button("Screen Recording + reveal binary") {
+          Button("Screen Recording + stream") {
             Permissions.stageDrag(model.paths.vncServer, into: .screenRecording)
           }
-          Button("Accessibility + reveal binary") {
+          Button("Accessibility + stream") {
+            Permissions.stageDrag(model.paths.vncServer, into: .accessibility)
+          }
+          Button("Accessibility + hands host") {
             Permissions.stageDrag(model.paths.computerUseHost, into: .accessibility)
           }
         }
-        Text("Both open the right pane and put the binary in a Finder window beside it. Drag it into the list, then switch the toggle on.")
+        Text("Two tools can move this desktop's mouse and keyboard: the stream server — it is what carries your clicks from the viewer, and without its Accessibility toggle the view is read-only — and the hands host. Each needs its own toggle.")
           .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
       } else {
         Text("These are per-account, and macOS only shows the dialogs inside the account they apply to. Switch to \(model.paths.account.capitalized) and run this same app there — it will be waiting on this step.")
