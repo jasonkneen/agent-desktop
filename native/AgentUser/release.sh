@@ -33,7 +33,7 @@ BIN="$HERE/.build/release/AgentUser"
 [ -x "$BIN" ] || { echo "ERROR: binary not found"; exit 1; }
 
 echo "Staging app..."
-AGENTUSER_BIN="$BIN" bash "$HERE/bundle.sh" "$OUT" >/dev/null
+AGENTUSER_BIN="$BIN" /bin/bash "$HERE/bundle.sh" "$OUT" >/dev/null
 
 echo "Signing (hardened runtime)..."
 codesign --force --options runtime --timestamp \

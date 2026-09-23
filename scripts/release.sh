@@ -38,7 +38,7 @@ swift test --package-path native/AgentUser 2>&1 | grep -E "Test run|error" | tai
 swift test --package-path native/agensis-cu 2>&1 | grep -E "Test run|error" | tail -2
 
 echo "==> build, sign, notarize, staple AgentUser.app"
-bash native/AgentUser/release.sh dist
+/bin/bash native/AgentUser/release.sh dist
 
 echo "==> DMG"
 STAGE="$(mktemp -d)"
