@@ -1,6 +1,6 @@
 {
   "name": "agent-desktop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Give an AI agent its own macOS user account to work in — computer use in a real desktop session, watched live in a browser, with nothing landing on the user's own screen.",
   "author": { "name": "jkneen" },
   "keywords": ["macos", "computer-use", "vnc", "agent", "sandbox", "noVNC"]
