@@ -38,7 +38,9 @@ swift test --package-path native/AgentUser 2>&1 | grep -E "Test run|error" | tai
 swift test --package-path native/agensis-cu 2>&1 | grep -E "Test run|error" | tail -2
 
 echo "==> build, sign, notarize, staple AgentUser.app"
-/bin/bash native/AgentUser/release.sh dist
+# The bundle's version string is read at build time, and VERSION is only bumped
+# after a successful build — so pass the new one in, or the app says the old one.
+AGENTUSER_VERSION="$VERSION" /bin/bash native/AgentUser/release.sh dist
 
 echo "==> DMG"
 STAGE="$(mktemp -d)"

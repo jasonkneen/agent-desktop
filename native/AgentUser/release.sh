@@ -36,6 +36,11 @@ echo "Staging app..."
 AGENTUSER_BIN="$BIN" /bin/bash "$HERE/bundle.sh" "$OUT" >/dev/null
 
 echo "Signing (hardened runtime)..."
+# Inside out: the bundled account-creation helper first, then the app. Signing
+# only the app leaves the helper with its linker ad-hoc signature, and Apple
+# rejects the whole submission (no Developer ID, no timestamp, no runtime).
+codesign --force --options runtime --timestamp \
+  --identifier com.agentdesktop.setup --sign "$IDENTITY" "$APP/Contents/MacOS/agentdesktop-setup"
 codesign --force --options runtime --timestamp \
   --identifier com.agentdesktop.agentuser --sign "$IDENTITY" "$APP"
 codesign -vvv --strict "$APP"
